@@ -228,7 +228,15 @@ final class OfficialClient {
                 for (int i = 0; i < list.length(); i++) {
                   JSONObject p = list.getJSONObject(i);
                   if (!p.optBoolean("enabled")) continue;
-                  JSONObject result = query(p);
+                  JSONObject result;
+                  try {
+                    result = query(p);
+                  } catch (IllegalArgumentException | IOException first) {
+                    // Just after boot or a network change the service can answer once with a busy
+                    // page; only a second refusal is taken as an expired login.
+                    Thread.sleep(3000);
+                    result = query(p);
+                  }
                   synchronized (daemon) {
                     String bound = boundIdentity(daemon, result, p.getString("id"));
                     if (bound.isEmpty()
