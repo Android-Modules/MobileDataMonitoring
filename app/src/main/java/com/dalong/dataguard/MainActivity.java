@@ -28,6 +28,7 @@ public final class MainActivity extends Activity {
   JSONObject status;
   int slot = 2, tab;
   boolean busy, foreground, webReading;
+  int switching;
   boolean initialCard = true;
   long lastTouch;
   String logFilter = "all";
@@ -228,71 +229,30 @@ public final class MainActivity extends Activity {
       return insets;
     });
     base.requestApplyInsets();
+    boolean live = !GuardApplication.off(this) && status != null;
     LinearLayout header = new LinearLayout(this);
     header.setGravity(Gravity.CENTER_VERTICAL);
+    header.setMinimumHeight(dp(52));
     LinearLayout words = ui.column();
-    words.addView(ui.heading("流量守卫", 23));
-    words.addView(
-        ui.text(
-            new String[] {"安心用量 · 每张卡有数", "为每张卡安排好流量", "让本地用量与官方对齐", "限制、用卡与模块管理", "记录每一次用量与操作"}
-                [tab],
-            12,
-            ui.muted));
+    words.addView(ui.heading("流量守卫", 22));
+    statusLine = ui.text(headerStatus(), 12, ui.muted);
+    statusLine.setSingleLine(true);
+    statusLine.setEllipsize(TextUtils.TruncateAt.END);
+    words.addView(statusLine);
     header.addView(words, new LinearLayout.LayoutParams(0, -2, 1));
-    if (!GuardApplication.off(this))
-      header.addView(ui.iconButton("swap", "管理数据卡与切换", this::dataCardSheet));
+    if (live && (cardFor(1) != null || cardFor(2) != null)) header.addView(switchBar());
     base.addView(header);
-    ui.space(base, 12);
-    LinearLayout sims = new LinearLayout(this);
-    for (int s = 1; s <= 2; s++) {
-      final int target = s;
-      JSONObject c = cardFor(s);
-      LinearLayout tile = ui.column();
-      tile.setPadding(dp(13), dp(12), dp(13), dp(12));
-      tile.setBackground(
-          ui.outlined(s == slot ? ui.soft : ui.surface, 18, s == slot ? ui.accent : ui.line));
-      LinearLayout top = new LinearLayout(this);
-      top.setGravity(Gravity.CENTER_VERTICAL);
-      View mark = carrierIcon(code(c));
-      top.addView(mark, new LinearLayout.LayoutParams(dp(27), dp(27)));
-      TextView name = ui.heading(provider(c), 13);
-      name.setSingleLine(true);
-      name.setEllipsize(TextUtils.TruncateAt.END);
-      LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(0, -2, 1);
-      np.leftMargin = dp(7);
-      top.addView(name, np);
-      tile.addView(top);
-      ui.space(tile, 6);
-      tile.addView(ui.text(numberLabel(c), 12, s == slot ? ui.accent : ui.muted));
-      ui.space(tile, 4);
-      boolean carrying = c != null && status.optInt("activeSlot") == s;
-      String detail =
-          "卡 "
-              + s
-              + (c == null
-                  ? " · 无可用 SIM"
-                  : carrying
-                      ? status.optBoolean("dataOn") ? " · 上网中" : " · 数据已关闭"
-                      : cardLocked(c) ? " · 已禁用数据" : " · 未使用");
-      tile.addView(ui.text(detail, 11, s == slot ? ui.accent : ui.muted));
-      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
-      if (s == 2) lp.leftMargin = dp(10);
-      sims.addView(tile, lp);
-      tile.setFocusable(true);
-      tile.setContentDescription("查看卡 " + s + " " + provider(c) + "，不切换移动数据");
-      tile.setOnClickListener(v -> {
-        if (c != null) selectView(target);
-        else showMessage("卡槽暂不可用", "插入或启用 SIM 后自动识别。此操作不会改变当前数据卡。");
-      });
-    }
-    if (!GuardApplication.off(this) && tab != 4) {
-      base.addView(sims);
-      if (status != null && cardFor(1) != null && cardFor(2) != null) {
-        ui.space(base, 8);
-        base.addView(switchBar());
+    if (live && tab != 4) {
+      ui.space(base, 10);
+      LinearLayout sims = new LinearLayout(this);
+      for (int s = 1; s <= 2; s++) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
+        if (s == 2) lp.leftMargin = dp(10);
+        sims.addView(simTile(s), lp);
       }
+      base.addView(sims);
     }
-    ui.space(base, 8);
+    ui.space(base, 6);
     scroll = new ScrollView(this);
     scroll.setFillViewport(true);
     scroll.setClipToPadding(false);
@@ -300,20 +260,6 @@ public final class MainActivity extends Activity {
     body.setPadding(0, 0, 0, dp(12));
     scroll.addView(body);
     base.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-    statusLine =
-        ui.text(
-            GuardApplication.off(this)
-                ? "模块已关闭"
-                : status == null
-                    ? "正在连接安全监控…"
-                    : "自动识别 SIM · "
-                        + time(status.optLong("sampleAt"))
-                        + " 更新"
-                        + (wifiPaused() ? " · Wi-Fi 联网，限制暂停" : ""),
-            11,
-            ui.muted);
-    statusLine.setPadding(dp(2), dp(3), 0, dp(5));
-    if (tab != 4) body.addView(statusLine);
     for (int s = 1; s <= 2; s++) {
       final int target = s;
       JSONObject c = cardFor(s);
@@ -393,31 +339,110 @@ public final class MainActivity extends Activity {
     ui.space(base, 5);
   }
 
+  String headerStatus() {
+    if (GuardApplication.off(this)) return "模块已关闭 · 移动数据由系统管理";
+    if (status == null) return "正在连接安全监控…";
+    String data =
+        !status.optBoolean("dataOn")
+            ? "移动数据已关闭"
+            : status.optInt("activeSlot") > 0 ? "卡 " + status.optInt("activeSlot") + " 上网中" : "移动数据已开启";
+    long at = status.optLong("sampleAt");
+    return at <= 0
+        ? data
+        : data + " · " + new SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(new Date(at)) + " 更新";
+  }
+
   /** Always in reach: which card carries data now, and a one-tap move to the other. */
   LinearLayout switchBar() {
     LinearLayout bar = new LinearLayout(this);
     bar.setGravity(Gravity.CENTER_VERTICAL);
-    bar.setPadding(dp(13), dp(5), dp(5), dp(5));
-    bar.setBackground(ui.outlined(ui.surface, 16, ui.line));
+    bar.setPadding(dp(3), dp(3), dp(3), dp(3));
+    bar.setBackground(ui.shape(ui.surface, 16));
     boolean on = status.optBoolean("dataOn");
     int active = status.optInt("activeSlot");
-    TextView label = ui.text(on ? "上网卡" : "数据已关闭", 12, ui.muted);
-    bar.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
     for (int s = 1; s <= 2; s++) {
       final int target = s;
-      boolean current = on && active == s;
+      JSONObject c = cardFor(s);
+      boolean current = on && active == s, pending = switching == s;
       TextView chip =
-          ui.text((current ? "● " : "") + "卡 " + s, 13, current ? ui.surface : ui.accent);
+          ui.text(
+              pending ? "切换中" : (current ? "● " : "") + "卡 " + s,
+              14,
+              current ? (ui.dark ? 0xff1b2746 : Color.WHITE) : c == null ? ui.muted : ui.accent);
+      chip.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
       chip.setGravity(Gravity.CENTER);
-      chip.setPadding(dp(16), dp(8), dp(16), dp(8));
-      chip.setBackground(ui.shape(current ? ui.accent : ui.soft, 12));
-      chip.setContentDescription((current ? "正在使用卡 " : "切换到卡 ") + s);
-      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-      lp.leftMargin = dp(6);
+      chip.setMinWidth(dp(64));
+      chip.setPadding(dp(14), 0, dp(14), 0);
+      chip.setBackground(ui.ripple(current ? ui.accent : ui.surface, 13));
+      if (c == null) chip.setAlpha(.4f);
+      else if (cardLocked(c) && !current) chip.setAlpha(.6f);
+      chip.setContentDescription(
+          c == null ? "卡 " + s + " 无可用 SIM" : (current ? "正在使用卡 " : "切换到卡 ") + s + " 上网");
+      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(40));
+      if (s == 2) lp.leftMargin = dp(2);
       bar.addView(chip, lp);
-      chip.setOnClickListener(v -> quickSwitch(target));
+      chip.setOnClickListener(v -> {
+        if (c == null) toast("卡 " + target + " 无可用 SIM");
+        else quickSwitch(target);
+      });
+      chip.setOnLongClickListener(v -> {
+        dataCardSheet();
+        return true;
+      });
     }
     return bar;
+  }
+
+  /** Tiles only choose which card the page shows; the header switch moves the data. */
+  LinearLayout simTile(int s) {
+    JSONObject c = cardFor(s);
+    boolean chosen = s == slot;
+    LinearLayout tile = new LinearLayout(this);
+    tile.setGravity(Gravity.CENTER_VERTICAL);
+    tile.setPadding(dp(12), dp(10), dp(10), dp(10));
+    tile.setBackground(ui.outlined(chosen ? ui.soft : ui.surface, 18, chosen ? ui.accent : ui.surface));
+    tile.addView(carrierIcon(code(c)), new LinearLayout.LayoutParams(dp(28), dp(28)));
+    LinearLayout words = ui.column();
+    LinearLayout line = new LinearLayout(this);
+    line.setGravity(Gravity.CENTER_VERTICAL);
+    SpannableStringBuilder label = new SpannableStringBuilder(provider(c));
+    String province = c == null ? "" : c.optString("province");
+    if (showRegion() && !province.isEmpty()) {
+      int start = label.length();
+      label.append("  ").append(province);
+      label.setSpan(new android.text.style.AbsoluteSizeSpan(11, true), start, label.length(), 0);
+      label.setSpan(
+          new android.text.style.ForegroundColorSpan(chosen ? ui.accent : ui.muted), start, label.length(), 0);
+    }
+    TextView name = ui.heading("", 13);
+    name.setText(label);
+    name.setSingleLine(true);
+    name.setEllipsize(TextUtils.TruncateAt.END);
+    line.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+    boolean carrying = c != null && status.optBoolean("dataOn") && status.optInt("activeSlot") == s;
+    if (carrying || cardLocked(c)) {
+      TextView state = ui.heading(carrying ? "上网" : "禁用", 11);
+      state.setTextColor(carrying ? ui.accent : ui.warn);
+      LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(-2, -2);
+      sl.leftMargin = dp(4);
+      line.addView(state, sl);
+    }
+    words.addView(line);
+    TextView number =
+        ui.text(c == null ? "卡 " + s + " · 无 SIM" : "卡 " + s + " · " + numberLabel(c), 11, chosen ? ui.accent : ui.muted);
+    number.setSingleLine(true);
+    number.setEllipsize(TextUtils.TruncateAt.END);
+    words.addView(number);
+    LinearLayout.LayoutParams wp = new LinearLayout.LayoutParams(0, -2, 1);
+    wp.leftMargin = dp(8);
+    tile.addView(words, wp);
+    tile.setFocusable(true);
+    tile.setContentDescription("查看卡 " + s + " " + provider(c) + "，不切换移动数据");
+    tile.setOnClickListener(v -> {
+      if (c != null) selectView(s);
+      else showMessage("卡槽暂不可用", "插入或启用 SIM 后自动识别。此操作不会改变当前数据卡。");
+    });
+    return tile;
   }
 
   /** One slim line for the limit state; the details live in Settings, not on the overview. */
@@ -480,8 +505,9 @@ public final class MainActivity extends Activity {
       return;
     }
     busy = true;
+    switching = target;
     if (sheet != null) sheet.dismiss();
-    toast("正在切换到卡 " + target);
+    render();
     io.execute(() -> {
       try {
         JSONObject result =
@@ -493,6 +519,7 @@ public final class MainActivity extends Activity {
         GuardApplication.syncLock(result);
         main.post(() -> {
           busy = false;
+          switching = 0;
           if (isDestroyed()) return;
           status = result;
           slot = target;
@@ -502,6 +529,8 @@ public final class MainActivity extends Activity {
       } catch (Exception e) {
         main.post(() -> {
           busy = false;
+          switching = 0;
+          render();
           load(false, true);
           showMessage("未能切换到卡 " + target, safeError(e));
         });
@@ -536,49 +565,8 @@ public final class MainActivity extends Activity {
     LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(-1, -2);
     barLp.setMargins(0, dp(2), 0, dp(4));
     body.addView(limitBar(), barLp);
-    LinearLayout p = balanceHeader(card, official);
-    if (official != null) {
-      p = panel();
-      title(p, "本卡官方定向余额");
-      directedSummary(p, official);
-      JSONArray rows = official.optJSONArray("packages");
-      Set<String> seen = new HashSet<>();
-      if (rows != null)
-        for (int i = 0; i < rows.length(); i++) {
-          JSONObject row = rows.optJSONObject(i);
-          if (row == null
-              || !"2".equals(row.optString("type"))
-              || officialExpired(row)
-              || !seen.add(row.optString("id", "row-" + i))) continue;
-          ui.row(
-              p,
-              "packages",
-              row.optString("name"),
-              "总量 "
-                  + officialAmount(row.optLong("total", -1))
-                  + " · 剩余 "
-                  + officialAmount(row.optLong("remaining", -1)),
-              () -> openOfficialPack(row.optString("id")));
-        }
-      note(p, "官方获取时间 · " + time(official.optLong("fetchedAt")));
-      ui.row(p, "packages", "查看官方套餐明细", "逐项查看总量、已用与剩余", () -> officialDetails(official));
-    }
-    p = panel();
-    title(p, "通用用量与限制");
-    metric(p, "通用停止阈值", bytes(cc.optLong("reserve", 500000000)));
-    metric(p, "通用可用余量 · 本地估算", carrierBytes(card.optLong("remaining", -1)));
-    generalAccountingNote(p, cc);
-    metric(p, "本期蜂窝总用量 · 含通用与定向", carrierBytes(u.optLong("raw", -1)));
-    ui.row(p, "edit", "设置通用停止阈值", "剩余多少 MB／GB 时停止", this::editCard);
-    p = panel();
-    ui.row(p, "sim", "本卡号码", numberLabel(card), this::bindNumberSheet);
-    ui.row(
-        p,
-        status.optBoolean("dataOn") ? "play" : "stop",
-        status.optBoolean("dataOn") ? dataCardName() + " 正在联网" : "移动数据已关闭",
-        "当前数据卡：" + dataCardName() + " · 点击管理",
-        this::dataCardSheet);
-    p = panel();
+    balanceHeader(card, official);
+    LinearLayout p = panel();
     ui.section(
         p,
         "定向流量包",
@@ -587,40 +575,65 @@ public final class MainActivity extends Activity {
           tab = 1;
           render();
         });
+    int shown = 0, hidden = 0;
+    JSONArray rows = official == null ? null : official.optJSONArray("packages");
+    Set<String> seen = new HashSet<>();
+    if (rows != null)
+      for (int i = 0; i < rows.length(); i++) {
+        JSONObject row = rows.optJSONObject(i);
+        if (row == null
+            || !"2".equals(row.optString("type"))
+            || officialExpired(row)
+            || !seen.add(row.optString("id", "row-" + i))) continue;
+        if (shown >= 4) {
+          hidden++;
+          continue;
+        }
+        shown++;
+        ui.row(
+            p,
+            "packages",
+            row.optString("name"),
+            "剩余 "
+                + officialAmount(row.optLong("remaining", -1))
+                + " · 总量 "
+                + officialAmount(row.optLong("total", -1)),
+            () -> openOfficialPack(row.optString("id")));
+      }
     JSONArray packs = cc.getJSONArray("packages");
-    if (packs.length() == 0) ui.row(p, "add", "添加第一个流量包", "勾选已有套餐，或手动新增", this::addPackageSheet);
-    for (int i = 0; i < Math.min(3, packs.length()); i++) {
+    for (int i = 0; i < packs.length(); i++) {
       final int index = i;
       JSONObject pack = packs.getJSONObject(i);
-      ui.row(
-          p, "packages", pack.optString("name"), packEstimate(pack, u), () -> packDetails(index));
+      if (pack.has("officialPackageId") && seen.contains(pack.optString("officialPackageId")))
+        continue;
+      if (shown >= 4) {
+        hidden++;
+        continue;
+      }
+      shown++;
+      ui.row(p, "packages", pack.optString("name"), packEstimate(pack, u), () -> packDetails(index));
     }
-    if (packs.length() > 3) note(p, "共 " + packs.length() + " 个流量包，在流量包页面查看全部。");
+    if (shown == 0)
+      ui.row(p, "add", "添加定向流量包", "勾选本卡官方套餐，或手动新增应用与规则", this::addPackageSheet);
+    if (hidden > 0) note(p, "另有 " + hidden + " 个，在流量包页面查看全部。");
+    if (official != null)
+      ui.row(p, "chevron", "查看官方套餐明细", "逐项查看通用、定向与套外", () -> officialDetails(official));
     p = panel();
     ui.section(
         p,
         "应用蜂窝用量",
         "说明",
         () -> showMessage("用量如何计算", "系统蜂窝总量为唯一总账。应用用量只作为分类参考，共享 UID 无法拆开；未核实的定向量不会扣减通用保护预算。"));
+    ui.space(p, 4);
     JSONObject uids = u.optJSONObject("uids");
-    if (uids != null) {
-      List<String> ids = new ArrayList<>();
-      uids.keys().forEachRemaining(ids::add);
-      ids.sort((a, b) -> Long.compare(uids.optLong(b), uids.optLong(a)));
-      int count = 0;
-      for (String id : ids) {
-        if (count++ >= 5) break;
-        String[] pkgs = getPackageManager().getPackagesForUid(Integer.parseInt(id));
-        metric(p, pkgs == null ? "系统 UID " + id : appLabel(pkgs[0]), bytes(uids.optLong(id)));
-      }
-      if (ids.isEmpty()) note(p, "还没有可展示的应用用量。");
+    List<String> ids = new ArrayList<>();
+    if (uids != null) uids.keys().forEachRemaining(ids::add);
+    ids.sort((a, b) -> Long.compare(uids.optLong(b), uids.optLong(a)));
+    for (String id : ids.subList(0, Math.min(5, ids.size()))) {
+      String[] pkgs = getPackageManager().getPackagesForUid(Integer.parseInt(id));
+      metric(p, pkgs == null ? "系统 UID " + id : appLabel(pkgs[0]), bytes(uids.optLong(id)));
     }
-    ui.row(
-        p,
-        "sim",
-        "SIM 识别详情",
-        provider(card) + " · " + card.optString("carrierSource", "等待识别"),
-        this::simDetails);
+    if (ids.isEmpty()) note(p, "还没有可展示的应用用量。");
   }
 
   View carrierIcon(String carrier) {
@@ -704,71 +717,42 @@ public final class MainActivity extends Activity {
 
   void packages() throws Exception {
     JSONObject cc = selected().getJSONObject("config");
-    balanceHeader(selected(), currentOfficial());
-    LinearLayout p = panel();
-    ui.row(
-        p,
-        "sim",
-        "通用停止阈值",
-        bytes(cc.optLong("reserve", 500000000)) + " · 剩余不高于此值时停止",
-        this::editCard);
-    note(p, cc.optBoolean("officialQuotaManaged") ? "限制额度随本卡官方通用总量更新。" : "通用总量为手动填写；停止阈值单独设置。");
-    JSONObject general = cc.optJSONObject("officialGeneral");
-    if (general != null)
-      note(
-          p,
-          "本卡官方 · 已用 "
-              + carrierBytes(general.optLong("used", -1))
-              + " · 剩余 "
-              + carrierBytes(general.optLong("remaining", -1))
-              + " · "
-              + time(general.optLong("at")));
-    ui.row(
-        p,
-        "shield",
-        "通用流量限制",
-        config().optBoolean("enabled") ? "已开启 · 点击管理" : "已关闭 · 点击开启",
-        () -> {
-          tab = 3;
-          render();
-        });
     JSONObject official = currentOfficial();
+    LinearLayout p = panel();
+    ui.section(p, "本卡定向余额", official == null ? null : "明细", () -> officialDetails(official));
     if (official != null) {
-      p = panel();
-      title(p, "本卡官方定向余额");
       directedSummary(p, official);
-      note(p, "获取时间 · " + time(official.optLong("fetchedAt")));
-      ui.row(p, "packages", "查看官方套餐明细", "逐项查看总量、已用与剩余", () -> officialDetails(official));
-    }
+      note(p, "数据来源 · " + sourceLabel(official));
+    } else note(p, "在总览更新本卡官方余量后，这里显示官方定向总量、已用与剩余。");
+    ui.row(p, "shield", "定向额度与用尽设置", "逐包设置提醒、用尽保护和断开确认", this::packageLimitsSheet);
     LinearLayout heading = ui.column();
-    ui.section(heading, "定向流量包", "＋ 添加", this::addPackageSheet);
+    heading.setPadding(dp(4), dp(6), 0, 0);
+    ui.section(heading, "我的流量包", "＋ 添加", this::addPackageSheet);
     body.addView(heading);
-    p = panel();
-    ui.row(p, "shield", "定向额度与用尽设置", "快速选择流量包，设置额度、提醒和断开确认", this::packageLimitsSheet);
     JSONArray packs = cc.getJSONArray("packages"), catalog = cc.optJSONArray("officialCatalog");
-    boolean unconfigured = false;
+    LinearLayout pending = null;
     for (int i = 0; catalog != null && i < catalog.length(); i++) {
       JSONObject item = catalog.getJSONObject(i);
       String id = item.optString("officialPackageId");
       if (packIndex(id) >= 0 || officialExpired(item)) continue;
-      unconfigured = true;
-      p = panel();
+      if (pending == null) {
+        pending = panel();
+        pending.addView(ui.text("本卡官方包 · 尚未配置应用和规则", 12, ui.muted));
+      }
+      JSONObject balance = item.optJSONObject("officialBalance");
       ui.row(
-          p,
+          pending,
           "add",
           item.optString("name"),
-          "本卡官方包 · 未配置应用和规则，点击添加",
+          balance == null
+              ? "点击添加应用和规则"
+              : "剩余 "
+                  + officialAmount(balance.optLong("remaining", -1))
+                  + " · 总量 "
+                  + officialAmount(balance.optLong("total", -1)),
           () -> openOfficialPack(id));
-      JSONObject balance = item.optJSONObject("officialBalance");
-      if (balance != null)
-        note(
-            p,
-            "总量 "
-                + officialAmount(balance.optLong("total", -1))
-                + " · 剩余 "
-                + officialAmount(balance.optLong("remaining", -1)));
     }
-    if (packs.length() == 0 && !unconfigured) {
+    if (packs.length() == 0 && pending == null) {
       p = panel();
       title(p, "让每个流量包有自己的账本");
       note(p, "可选择多个应用，或添加多个域名规则。");
@@ -778,6 +762,7 @@ public final class MainActivity extends Activity {
       final int index = i;
       JSONObject pack = packs.getJSONObject(i);
       p = panel();
+      p.setPadding(dp(16), dp(6), dp(16), dp(10));
       ui.row(
           p,
           "packages",
@@ -787,14 +772,27 @@ public final class MainActivity extends Activity {
               + pack.optJSONArray("rules").length()
               + " 条规则",
           () -> packDetails(index));
-      packAmounts(p, pack);
       JSONObject balance = directedBalance(pack);
+      LinearLayout stats = new LinearLayout(this);
+      if (balance == null) {
+        stat(stats, "总量", packQuota(pack), 15);
+        p.addView(stats);
+        note(p, packEstimate(pack, selected().getJSONObject("usage")));
+      } else {
+        stat(stats, "剩余", officialAmount(balance.optLong("remaining", -1)), 15);
+        stat(stats, "已用", officialAmount(balance.optLong("used", -1)), 15);
+        stat(stats, "总量", packQuota(pack), 15);
+        p.addView(stats);
+        if (balance.optBoolean("manual")) note(p, "手动已用基准 · " + time(balance.optLong("manualAt")));
+        else if (!balance.optBoolean("official")) note(p, "本地估算");
+      }
       if (balance != null && balance.optBoolean("exhausted")) note(p, "该定向包已用尽，继续使用可能消耗通用流量。");
+      ui.divider(p);
       ui.row(p, "shield", "已用量与用尽设置", packageProtection(pack), () -> packProtection(index));
     }
     p = panel();
     ui.row(p, "download", "导入流量包配置", "支持本地配置文件", this::importFile);
-    ui.row(p, "shield", "启用应用规则观察", "为绑定应用及规则使用应用启用观察", this::requestAppScopes);
+    ui.row(p, "apps", "启用应用规则观察", "为绑定应用及规则使用应用启用观察", this::requestAppScopes);
   }
 
   String officialSource() {
@@ -834,58 +832,95 @@ public final class MainActivity extends Activity {
     JSONObject general = groups == null ? null : groups.optJSONObject("1");
     OfficialTotals.Summary directed = directedTotals(official);
     LinearLayout p = panel();
-    p.setBackground(ui.outlined(ui.soft, 22, ui.soft));
+    p.setBackground(ui.outlined(ui.soft, 24, ui.soft));
+    p.setPadding(dp(18), dp(16), dp(18), dp(16));
     boolean manual = manualBalance(card, official);
-    p.addView(ui.chip(alias(card) + " · 官方流量余额", ui.accent, ui.surface));
-    ui.space(p, 12);
-    note(p, manual ? "通用流量剩余 · 手动设置，按本地用量扣减" : "通用流量剩余");
+    LinearLayout top = new LinearLayout(this);
+    top.setGravity(Gravity.CENTER_VERTICAL);
+    top.addView(
+        ui.text(manual ? "通用剩余 · 手动设置" : "通用剩余", 13, ui.muted),
+        new LinearLayout.LayoutParams(0, -2, 1));
+    top.addView(
+        ui.chip(
+            official == null ? alias(card) + " · 待更新" : alias(card) + " · " + sourceLabel(official),
+            ui.accent,
+            ui.surface));
+    p.addView(top);
+    ui.space(p, 2);
     p.addView(
         ui.heading(
             manual
                 ? carrierBytes(card.optLong("remaining", -1))
                 : general == null ? "待获取" : officialAmount(general.optLong("remaining", -1)),
-            33));
+            34));
+    if (general != null && !manual && general.optLong("total", -1) > 0) {
+      ui.space(p, 6);
+      progress(p, general.optLong("used", 0), general.optLong("total"));
+      ui.space(p, 6);
+      p.addView(
+          ui.text(
+              "已用 "
+                  + officialAmount(general.optLong("used", -1))
+                  + " · 总量 "
+                  + officialAmount(general.optLong("total", -1)),
+              12,
+              ui.muted));
+    } else if (manual) note(p, "按此后的本地蜂窝用量扣减，官方查询成功后以官方为准。");
     thresholdRow(p, card);
-    ui.space(p, 12);
-    note(p, directed.unknownRemaining() > 0 ? "定向流量剩余（已知）" : "定向流量剩余");
-    p.addView(
-        ui.heading(
-            official == null
-                ? "待获取"
-                : directed.count() == 0
-                    ? "暂无有效套餐"
-                    : officialAmount(
-                        directed.unknownRemaining() == directed.count()
-                            ? -1
-                            : directed.remaining()),
-            27));
+    LinearLayout stats = new LinearLayout(this);
+    stat(
+        stats,
+        directed.unknownRemaining() > 0 ? "定向剩余（已知）" : "定向剩余",
+        official == null
+            ? "待获取"
+            : directed.count() == 0
+                ? "暂无套餐"
+                : officialAmount(
+                    directed.unknownRemaining() == directed.count() ? -1 : directed.remaining()));
+    stat(stats, "本期蜂窝用量", carrierBytes(card.optJSONObject("usage") == null ? -1 : card.optJSONObject("usage").optLong("raw", -1)));
+    p.addView(stats);
     if (directed.unknownRemaining() > 0)
-      note(p, "另有 " + directed.unknownRemaining() + " 个包未提供余额，不计入合计。");
+      note(p, "另有 " + directed.unknownRemaining() + " 个定向包未提供余额，不计入合计。");
     if (official != null) {
-      if (general != null && !manual)
-        note(
-            p,
-            "通用总量 "
-                + officialAmount(general.optLong("total", -1))
-                + " · 已用 "
-                + officialAmount(general.optLong("used", -1)));
       outsideNotice(p, official);
-      note(
-          p,
-          "sms".equals(official.optString("sourceMode"))
-              ? "短信查询 · 运营商统计截至 " + time(official.optLong("queryAt"))
-              : "web".equals(official.optString("sourceMode"))
-                  ? "网上营业厅 · 统计截至 " + time(official.optLong("queryAt"))
-                  : "官方获取时间 · " + time(official.optLong("fetchedAt")));
       if (System.currentTimeMillis() - official.optLong("fetchedAt") > 86400000L)
-        note(p, "官方数据已超过 1 天未更新，可能需要重新登录官方 App。");
-      note(p, "定向余额按各包相加，不同包不可互抵。各包余额见下方明细。");
-    } else note(p, "更新本卡官方余量后显示通用及定向余额，也可以手动设置。");
+        note(p, "官方数据已超过 1 天未更新，可能需要重新登录。");
+    }
+    LinearLayout actions = new LinearLayout(this);
     boolean supported = Set.of("mobile", "unicom").contains(code(card));
-    if (supported) officialButton(p);
-    else ui.button(p, "打开官方查询", true, () -> launchCarrier(code(card)));
-    if (official == null) ui.row(p, "edit", "手动设置流量", "填写官方 App 或短信里的剩余流量", this::manualGeneralSheet);
+    LinearLayout first = ui.column(), second = ui.column();
+    if (supported) officialButton(first);
+    else ui.button(first, "打开官方查询", true, () -> launchCarrier(code(card)));
+    ui.button(second, "手动设置", false, this::manualGeneralSheet).setBackground(ui.ripple(ui.surface, 28));
+    actions.addView(first, new LinearLayout.LayoutParams(0, -2, 2.2f));
+    LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(0, -2, 1);
+    sp.leftMargin = dp(8);
+    actions.addView(second, sp);
+    ui.space(p, 4);
+    p.addView(actions);
     return p;
+  }
+
+  String sourceLabel(JSONObject official) {
+    String mode = official.optString("sourceMode");
+    long at = "sms".equals(mode) || "web".equals(mode) ? official.optLong("queryAt") : official.optLong("fetchedAt");
+    String when = at <= 0 ? "" : new SimpleDateFormat("MM-dd HH:mm", Locale.ROOT).format(new Date(at));
+    return ("sms".equals(mode) ? "短信 " : "web".equals(mode) ? "营业厅 " : "官方 ") + when;
+  }
+
+  void stat(LinearLayout row, String label, String value) {
+    stat(row, label, value, 18);
+  }
+
+  void stat(LinearLayout row, String label, String value, int size) {
+    LinearLayout c = ui.column();
+    c.setPadding(0, dp(10), dp(8), 0);
+    c.addView(ui.text(label, 12, ui.muted));
+    TextView v = ui.heading(value, size);
+    v.setMaxLines(2);
+    v.setEllipsize(TextUtils.TruncateAt.END);
+    c.addView(v);
+    row.addView(c, new LinearLayout.LayoutParams(0, -2, 1));
   }
 
   /** The most recent figure wins: a value typed after the last official query is the current one. */
@@ -974,6 +1009,16 @@ public final class MainActivity extends Activity {
             } catch (Exception ignored) {
             }
           });
+    if (jiangsuApp(cardFor(slot)))
+      ui.row(
+          s.content,
+          "apps",
+          "打开中国移动江苏 App",
+          "手动进入余量查询，页面加载后自动读取",
+          () -> {
+            s.dismiss();
+            openJiangsuApp();
+          });
     if (officialSource().equals("mobile"))
       ui.row(
           s.content,
@@ -1006,13 +1051,17 @@ public final class MainActivity extends Activity {
       note(s.content, "3. 用本卡号码登录，打开一次首页或余量页面。");
       note(s.content, "约 10 秒后自动取得连接，之后可后台更新。登录号码必须与本卡一致，否则不会保存。另一张联通卡需要在分身里登录。");
     } else if (carrier.equals("mobile")) {
-      title(s.content, "中国移动");
-      note(s.content, "1. 在 LSPosed 为流量守卫勾选“中国移动江苏”。分身里的 App 要在分身用户下单独勾选。");
-      note(s.content, "2. 强行停止江苏移动 App 后重新打开。");
-      note(s.content, "3. 用本卡号码登录，点击流量进入“余量查询”一次。");
-      note(s.content, "之后一键更新和定时都在后台读取，不影响屏幕，熄屏也能运行。");
-      note(s.content, "登录过期时可以用短信查询：向 10086 发送 CXLL，回复里有通用、定向和套外用量，不需要 App 登录。");
-      note(s.content, "也可以在“网上营业厅”用本卡号码和短信验证码登录。之后一键更新和定时查询都在模块里完成，不需要官方 App；登录状态只保存在本机，失效时会提示重新登录。");
+      JSONObject card = cardFor(slot);
+      title(s.content, "中国移动 · " + regionLabel(card));
+      note(s.content, "网上营业厅：全国移动号码可用。用本卡号码和短信验证码登录后，一键更新和定时查询都在模块里完成，不需要官方 App；登录状态只保存在本机，失效时会提示重新登录。");
+      note(s.content, "短信查询：向 10086 发送 CXLL，回复里有通用、定向和套外用量，不需要登录。");
+      if (jiangsuApp(card)) {
+        title(s.content, "中国移动江苏 App");
+        note(s.content, "1. 在 LSPosed 为流量守卫勾选“中国移动江苏”。分身里的 App 要在分身用户下单独勾选。");
+        note(s.content, "2. 强行停止江苏移动 App 后重新打开。");
+        note(s.content, "3. 用本卡号码登录，点击流量进入“余量查询”一次。");
+        note(s.content, "之后一键更新和定时都在后台读取，不影响屏幕；也可以随时在校准页手动打开 App 获取。");
+      } else note(s.content, "中国移动江苏 App 只支持江苏号码。归属地按 SIM 号码识别，SIM 不提供号码时按卡片编号识别。");
     } else note(s.content, "此运营商暂未接入官方查询，请手动设置流量。");
     s.primary("知道了", s::dismiss).show();
   }
@@ -1153,41 +1202,38 @@ public final class MainActivity extends Activity {
     JSONObject card = selected(), result = currentOfficial();
     String source = code(card);
     LinearLayout p = panel();
-    title(p, provider(card) + " · 本卡余量");
-    note(p, "卡 " + slot + " · " + numberLabel(card));
-    if (result != null) {
-      ui.space(p, 12);
-      JSONObject groups = result.optJSONObject("aggregates");
-      if (groups != null) {
-        JSONObject general = groups.optJSONObject("1");
-        if (manualBalance(card, result))
-          metric(p, "通用剩余 · 手动设置", carrierBytes(card.optLong("remaining", -1)));
-        else if (general != null)
-          metric(p, "通用剩余", officialAmount(general.optLong("remaining", -1)));
-      }
-      directedSummary(p, result);
-      outsideNotice(p, result);
-      metric(p, "获取时间", time(result.optLong("fetchedAt")));
-      ui.row(p, "packages", "查看套餐明细", "仅展示与本卡号码一致的结果", () -> officialDetails(result));
-    } else
+    ui.section(p, provider(card) + " · 官方查询", "连接方法", this::connectionHelp);
+    JSONObject queries = status.optJSONObject("officialQueries");
+    JSONObject query = queries == null ? null : queries.optJSONObject(card.getString("identity"));
+    if (query != null)
+      p.addView(
+          ui.text(
+              "最近一次 · " + time(query.optLong("at")) + " · " + GuardStore.cleanMessage(query.optString("message")),
+              12,
+              "error".equals(query.optString("state")) ? ui.warn : ui.muted));
+    else if (result == null)
       note(
           p,
           card.optString("numberKey").isEmpty()
               ? "完善本卡号码后，可核对并显示本卡官方余量。"
               : "暂无与本卡号码一致的官方余量。请在官方 App 使用该号码登录。");
     if (source.equals("mobile")) {
-      var framework = GuardApplication.framework;
-      if (framework != null && !framework.getScope().contains(Platform.MOBILE_APP))
-        ui.row(p, "shield", "授权读取中国移动江苏 App", "向 LSPosed 申请作用域，批准后才能读取余量", this::requestAppScopes);
+      boolean app = jiangsuApp(card), web = MobileWeb.usable(this, card.getString("identity"));
       officialButton(p);
       note(
           p,
-          MobileWeb.usable(this, card.getString("identity"))
-              ? "通过网上营业厅在后台查询，不需要官方 App，熄屏也能定时更新；登录失效时改用官方 App 隐藏页或短信。"
-              : "在后台读取官方余量页，不影响屏幕，熄屏也能定时更新。首次需在官方 App 点击流量进入余量查询一次；登录过期时可用短信查询。");
-      JSONObject queries = status.optJSONObject("officialQueries");
-      JSONObject query = queries == null ? null : queries.optJSONObject(card.getString("identity"));
-      if (query != null) note(p, query.optString("message") + " · " + time(query.optLong("at")));
+          web
+              ? "优先走网上营业厅，不需要官方 App，熄屏也能定时更新；失效时改用"
+                  + (app ? "江苏 App 隐藏页或短信。" : "短信。")
+              : app
+                  ? "江苏移动号码：在后台读取江苏 App 余量页，不影响屏幕。首次需在 App 点击流量进入余量查询一次。"
+                  : regionNote(card));
+      if (app) {
+        var framework = GuardApplication.framework;
+        if (framework != null && !framework.getScope().contains(Platform.MOBILE_APP))
+          ui.row(p, "shield", "授权读取中国移动江苏 App", "向 LSPosed 申请作用域，批准后才能读取余量", this::requestAppScopes);
+        ui.row(p, "apps", "打开中国移动江苏 App", "手动进入余量查询，页面加载后自动读取", this::openJiangsuApp);
+      }
       String webCard = MobileWeb.identity(this);
       boolean webHere = webCard.equals(card.getString("identity"));
       ui.row(
@@ -1222,9 +1268,6 @@ public final class MainActivity extends Activity {
     } else if (source.equals("unicom")) {
       officialButton(p);
       note(p, "在中国联通 App 用本卡号码登录并进入余量查询后，模块自动取得连接，之后后台定时更新。登录过期时一键更新会打开 App。");
-      JSONObject queries = status.optJSONObject("officialQueries");
-      JSONObject query = queries == null ? null : queries.optJSONObject(card.getString("identity"));
-      if (query != null) note(p, query.optString("message") + " · " + time(query.optLong("at")));
       ui.row(p, "apps", "打开本卡官方查询", "使用本卡号码登录中国联通", () -> launchCarrier("unicom"));
       scheduleRow(p);
     } else if (source.equals("telecom")) {
@@ -1232,14 +1275,90 @@ public final class MainActivity extends Activity {
       note(p, "电信官方自动读取尚未接入，可按官方结果手动校准。");
     } else note(p, "此运营商暂无官方查询，可先使用本地统计与手动校准。");
     p = panel();
-    ui.row(p, "shield", "连接方法", "模块如何取得官方余量", this::connectionHelp);
+    ui.section(p, "官方与本地对照", result == null ? null : "明细", () -> officialDetails(result));
+    JSONObject groups = result == null ? null : result.optJSONObject("aggregates");
+    JSONObject general = groups == null ? null : groups.optJSONObject("1");
+    LinearLayout stats = new LinearLayout(this);
+    stat(
+        stats,
+        "官方通用剩余",
+        general == null ? "待获取" : officialAmount(general.optLong("remaining", -1)),
+        16);
+    stat(stats, "本地通用估算", carrierBytes(card.optLong("remaining", -1)), 16);
+    p.addView(stats);
+    if (result != null) {
+      outsideNotice(p, result);
+      note(p, sourceLabel(result) + " · 仅展示与本卡号码一致的结果");
+    }
+    generalAccountingNote(p, card.getJSONObject("config"));
+    ui.divider(p);
     ui.row(p, "edit", "手动设置流量", "直接填写通用剩余", this::manualGeneralSheet);
-    ui.row(p, "sim", "本卡号码", numberLabel(card), this::bindNumberSheet);
-    ui.row(p, "edit", "手动校准通用用量", "仅填写官方通用已用，不合并定向已用", this::manualCorrection);
     JSONObject snap = card.getJSONObject("config").optJSONObject("calibration");
-    if (snap != null)
-      note(p, "通用已用 " + carrierBytes(snap.optLong("used")) + " · 截至 " + time(snap.optLong("asOf")));
+    ui.row(
+        p,
+        "edit",
+        "手动校准通用用量",
+        snap == null
+            ? "仅填写官方通用已用，不合并定向已用"
+            : "当前基准：已用 " + carrierBytes(snap.optLong("used")) + " · " + time(snap.optLong("asOf")),
+        this::manualCorrection);
+    p = panel();
+    ui.row(p, "sim", "本卡号码", numberLabel(card) + " · " + regionLabel(card), this::bindNumberSheet);
+    ui.row(
+        p,
+        "sim",
+        "SIM 识别详情",
+        provider(card) + " · " + card.optString("carrierSource", "等待识别"),
+        this::simDetails);
     note(p, "本地蜂窝用量按 SIM 单独记账；运营商登录账号不匹配时不混入本卡统计。");
+  }
+
+  boolean showRegion() {
+    return getPreferences(0).getBoolean("showRegion", true);
+  }
+
+  boolean jiangsuApp(JSONObject card) {
+    return card != null && card.optBoolean("jiangsuApp");
+  }
+
+  String regionLabel(JSONObject card) {
+    String province = card == null ? "" : card.optString("province");
+    return province.isEmpty() ? "归属地未识别" : "归属地 " + province;
+  }
+
+  String regionNote(JSONObject card) {
+    String province = card.optString("province");
+    return province.isEmpty()
+        ? "未识别本卡号码归属地。可登录网上营业厅或发短信查询；江苏号码在“本卡号码”填写号码后可使用江苏 App。"
+        : province + "移动号码：中国移动江苏 App 不适用，请登录网上营业厅或发短信查询。";
+  }
+
+  void openJiangsuApp() {
+    try {
+      JSONObject card = selected();
+      getPreferences(0)
+          .edit()
+          .putString("officialPending", card.getString("identity"))
+          .putLong("officialPendingAt", System.currentTimeMillis())
+          .apply();
+      submit(
+          null,
+          () -> {
+            try {
+              return RootClient.request(
+                  new JSONObject()
+                      .put("action", "openJiangsuApp")
+                      .put("slot", card.getInt("slot"))
+                      .put("identity", card.getString("identity")));
+            } catch (Exception e) {
+              getPreferences(0).edit().remove("officialPending").apply();
+              throw e;
+            }
+          },
+          "进入余量查询后自动读取，返回本页查看结果");
+    } catch (Exception e) {
+      showMessage("暂时无法打开", safeError(e));
+    }
   }
 
   void smsQuery() {
@@ -1315,10 +1434,11 @@ public final class MainActivity extends Activity {
               MobileWeb.expire(this);
               MobileWeb.lost(identity);
             }
+            String next = jiangsuApp(cardFor(target)) ? "改用江苏 App 读取" : "尝试其他方式";
             toast(
                 "login".equals(error)
-                    ? "网上营业厅登录已失效，改用官方 App 读取"
-                    : "网上营业厅暂未响应，改用官方 App 读取");
+                    ? "网上营业厅登录已失效，" + next
+                    : "网上营业厅暂未响应，" + next);
             rootRefresh(target, identity, true);
             return;
           }
@@ -1595,11 +1715,12 @@ public final class MainActivity extends Activity {
                   new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                       .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName())));
     }
-    limitShortcuts();
+    JSONObject cc = selected().getJSONObject("config");
     LinearLayout p = panel();
-    ui.section(p, "通用与定向限制详情", null, null);
+    ui.section(p, "限制", "说明", this::limitsHelp);
+    if (wifiPaused()) p.addView(ui.text("Wi-Fi 联网中，额度限制临时暂停；断开后自动恢复。", 12, ui.accent));
     boolean enabled = config().optBoolean("enabled");
-    Switch generalLimit = ui.toggle(p, "通用流量限制", enabled);
+    Switch generalLimit = ui.toggle(p, "通用流量限制 · 两张卡共用", enabled);
     generalLimit.setOnCheckedChangeListener((button, checked) -> {
       if (busy) {
         render();
@@ -1614,15 +1735,12 @@ public final class MainActivity extends Activity {
         showMessage("设置未保存", safeError(e));
       }
     });
-    note(p, "此开关统一管理两张卡，各卡设置自己的剩余停止阈值，默认 500 MB；不会自动开启移动数据。定向包用尽保护独立生效。");
-    JSONObject cc = selected().getJSONObject("config");
-    JSONObject general = cc.optJSONObject("officialGeneral");
-    if (general != null) metric(p, "通用官方余额", carrierBytes(general.optLong("remaining", -1)));
-    metric(p, "官方通用总量", carrierBytes(cc.optLong("quota", -1)));
-    metric(p, "通用可用余量 · 本地估算", carrierBytes(selected().optLong("remaining", -1)));
-    metric(p, "通用剩余停止阈值", bytes(cc.optLong("reserve", 500000000)));
-    generalAccountingNote(p, cc);
-    ui.row(p, "edit", "设置通用停止阈值", "卡 " + slot + " · 剩余多少 MB／GB 时停止", this::editCard);
+    ui.row(
+        p,
+        "edit",
+        "卡 " + slot + " 剩余阈值 · " + bytes(cc.optLong("reserve", 500000000)),
+        "本地通用估算 " + carrierBytes(selected().optLong("remaining", -1)) + " · 不高于阈值时停数据",
+        this::editCard);
     JSONArray packs = cc.getJSONArray("packages");
     int stopping = 0;
     for (int i = 0; i < packs.length(); i++)
@@ -1630,132 +1748,85 @@ public final class MainActivity extends Activity {
     ui.row(
         p,
         "packages",
-        "定向流量限制",
-        stopping + " / " + packs.length() + " 个包开启用尽保护",
+        "定向包用尽设置",
+        "卡 " + slot + " · " + stopping + " / " + packs.length() + " 个包开启用尽保护",
         this::packageLimitsSheet);
-    JSONObject official = currentOfficial();
-    if (official != null) {
-      OfficialTotals.Summary directed = directedTotals(official);
-      metric(
-          p,
-          "定向官方余额 · 已知合计",
-          directed.count() == 0
-              ? "未提供"
-              : officialAmount(
-                  directed.unknownRemaining() == directed.count() ? -1 : directed.remaining()));
-      note(p, "定向额度逐包独立，不能与通用额度或其他定向包互抵。点击上方逐包管理。");
-    }
-    p = panel();
-    title(p, "本机累计用量上限");
-    metric(p, "累计已用 · 含通用与定向", bytes(status.optLong("budgetUsed")));
-    metric(p, "累计限制开关", config().optBoolean("budgetEnabled") ? "已开启" : "已关闭（默认）");
-    metric(p, "设置上限", bytes(config().optLong("budgetLimit")));
-    note(
-        p,
-        "累计限制默认关闭；开启后按设置上限停数据。关闭开关、官方校准和清空日志均不清零累计记录。");
-    if (status.optLong("budgetUsed") >= cumulativeStopLine(config()))
-      note(p, "当前已达到本机累计上限，暂时无法恢复移动数据。");
-    ui.button(p, "设置本机累计上限", false, this::editBudget);
-    p = panel();
-    ui.section(p, "用卡与数据", null, null);
-    ui.row(
-        p,
-        "sim",
-        "当前数据卡 · " + dataCardName(),
-        status.optBoolean("dataOn") ? "移动数据已开启" : "移动数据已关闭",
-        this::dataCardSheet);
-    ui.button(
-        p,
-        status.optBoolean("dataOn") ? "停止移动数据" : "核验后恢复" + resumeName() + "数据",
-        true,
-        () -> {
-          if (status.optBoolean("dataOn")) action("stop", "移动数据已关闭");
-          else resumeSheet();
-        });
-    p = panel();
-    ui.row(p, "swap", "用卡策略", modeLabel(config().optString("mode", "fixed")), this::editPolicy);
-    ui.row(p, "download", "备份与导入设置", "保存或恢复限制、流量包和规则", this::backupSheet);
-    note(p, "Wi-Fi 暂停期间可手动切换数据卡；已禁止使用数据的卡在其他时候不能联网，也不会作为备用卡。");
-    p = panel();
-    ui.section(p, "保护健康", null, null);
-    metric(
-        p,
-        "Root 监控",
-        System.currentTimeMillis() - status.optLong("sampleAt") < 10000 ? "运行中" : "连接过期");
-    metric(p, "电话保护", status.optBoolean("hookCurrentBoot") ? "已就绪" : "待启用");
-    String fw = getSharedPreferences("module", 0).getString("framework", "");
-    metric(p, "LSPosed", fw.isEmpty() ? "待连接" : fw);
-    if (!status.optBoolean("hookCurrentBoot"))
-      note(p, "电话保护未就绪时不影响上网；已禁止使用数据的卡仍由后台监控关闭。");
-    if (!status.optString("fault").isEmpty()) note(p, status.optString("fault"));
-    ui.row(p, "shield", "查看模块设置", "管理作用域和框架状态", () -> launch("org.lsposed.manager"));
-    ui.row(p, "stop", "关闭模块并恢复系统", "停止全部限制，移动数据交还系统", this::shutdownSheet);
-    p = panel();
-    ui.row(
-        p,
-        "clock",
-        "查看操作日志",
-        GuardStore.cleanMessage(status.optString("receipt", "等待执行回执")),
-        () -> {
-          tab = 4;
-          render();
-        });
-    note(p, "版本 " + BuildConfig.VERSION_NAME);
-  }
-
-  void limitShortcuts() throws Exception {
-    JSONObject cc = selected().getJSONObject("config");
     long used = status.optLong("budgetUsed"), limit = config().optLong("budgetLimit");
-    LinearLayout p = panel();
-    ui.section(p, "限制设置", "说明", this::limitsHelp);
-    note(
-        p,
-        dataCardName()
-            + (status.optBoolean("dataOn") ? " 数据已开启" : " 数据已关闭")
-            + (wifiPaused() ? " · Wi-Fi 联网中，以下额度限制临时暂停。" : " · 以下限制分别生效，任一触发都可能停数据。"));
-    ui.row(
-        p,
-        "shield",
-        "Wi-Fi 暂停限制 · " + (config().optBoolean("pauseOnWifi", true) ? "开启" : "关闭"),
-        wifiPaused() ? "当前已暂停 · 断开后自动恢复" : "默认开启 · 联网时可手动切卡、开启数据",
-        this::wifiSettingsSheet);
     ui.row(
         p,
         "shield",
         "本机累计限制 · " + (config().optBoolean("budgetEnabled") ? "开启" : "关闭"),
         "已用 "
             + bytes(used)
-            + (config().optBoolean("budgetEnabled") ? " / 上限 " + bytes(limit) : " · 默认关闭，可点此开启"),
+            + (config().optBoolean("budgetEnabled") ? " / 上限 " + bytes(limit) : " · 默认关闭，关闭不清零"),
         this::editBudget);
+    if (used >= cumulativeStopLine(config())) note(p, "当前已达到本机累计上限，暂时无法恢复移动数据。");
     ui.row(
         p,
-        "sim",
-        "通用流量限制 · " + (config().optBoolean("enabled") ? "开启" : "关闭"),
-        "卡 "
-            + slot
-            + " · 可用 "
-            + carrierBytes(selected().optLong("remaining", -1))
-            + " · 停止阈值 "
-            + bytes(cc.optLong("reserve", 500000000)),
-        this::editCard);
-    JSONArray packs = cc.getJSONArray("packages");
-    int count = 0;
-    for (int i = 0; i < packs.length(); i++)
-      if (packs.getJSONObject(i).optBoolean("stopWhenEmpty")) count++;
+        "shield",
+        "Wi-Fi 暂停限制 · " + (config().optBoolean("pauseOnWifi", true) ? "开启" : "关闭"),
+        wifiPaused() ? "当前已暂停 · 断开后自动恢复" : "Wi-Fi 联网时可手动切卡、开启数据",
+        this::wifiSettingsSheet);
+    p = panel();
+    ui.section(p, "用卡与数据", null, null);
     ui.row(
         p,
-        "packages",
-        "定向包用尽设置",
-        "卡 " + slot + " · " + count + " / " + packs.length() + " 个包开启保护 · 提醒、断开确认",
-        this::packageLimitsSheet);
+        status.optBoolean("dataOn") ? "play" : "stop",
+        "当前数据卡 · " + dataCardName(),
+        (status.optBoolean("dataOn") ? "移动数据已开启" : "移动数据已关闭") + " · 右上角可一键切卡",
+        this::dataCardSheet);
     ui.row(
         p,
         "swap",
-        "用卡策略与卡槽限制",
-        wifiPaused() ? "临时暂停 · 允许手动切卡" : modeLabel(config().optString("mode")) + lockedSummary(),
+        "用卡策略",
+        wifiPaused() ? "临时暂停 · 允许手动切卡" : modeLabel(config().optString("mode", "fixed")) + lockedSummary(),
         this::editPolicy);
+    ui.row(
+        p,
+        "sim",
+        "卡 " + slot + " 用卡权限",
+        cardLocked(selected()) ? "已禁止使用移动数据 · 点击解除" : "允许使用 · 点击可禁止",
+        () -> cardAccessSheet(slot));
     if (!status.optBoolean("dataOn"))
       note(p, "最近执行结果：" + GuardStore.cleanMessage(status.optString("receipt", "等待核验")));
+    ui.button(
+        p,
+        status.optBoolean("dataOn") ? "停止移动数据" : "核验后恢复" + resumeName() + "数据",
+        !status.optBoolean("dataOn"),
+        () -> {
+          if (status.optBoolean("dataOn")) action("stop", "移动数据已关闭");
+          else resumeSheet();
+        });
+    p = panel();
+    ui.section(p, "显示", null, null);
+    Switch region = ui.toggle(p, "顶部 SIM 卡片显示号码归属地", showRegion());
+    region.setOnCheckedChangeListener((button, on) -> {
+      getPreferences(0).edit().putBoolean("showRegion", on).apply();
+      int y = scroll.getScrollY();
+      render();
+      scroll.post(() -> scroll.scrollTo(0, y));
+    });
+    note(p, "归属地按本卡号码识别，只在本机显示；校准页的本卡号码始终显示归属地。");
+    p = panel();
+    ui.section(p, "模块", null, null);
+    String fw = getSharedPreferences("module", 0).getString("framework", "");
+    LinearLayout health = new LinearLayout(this);
+    stat(
+        health,
+        "Root 监控",
+        System.currentTimeMillis() - status.optLong("sampleAt") < 10000 ? "运行中" : "连接过期",
+        14);
+    stat(health, "电话保护", status.optBoolean("hookCurrentBoot") ? "已就绪" : "待启用", 14);
+    stat(health, "LSPosed", fw.isEmpty() ? "待连接" : fw, 14);
+    p.addView(health);
+    if (!status.optBoolean("hookCurrentBoot"))
+      note(p, "电话保护未就绪时不影响上网；已禁止使用数据的卡仍由后台监控关闭。");
+    if (!status.optString("fault").isEmpty()) note(p, status.optString("fault"));
+    ui.divider(p);
+    ui.row(p, "download", "备份与导入设置", "保存或恢复限制、流量包和规则", this::backupSheet);
+    ui.row(p, "shield", "LSPosed 模块设置", "管理作用域和框架状态", () -> launch("org.lsposed.manager"));
+    ui.row(p, "stop", "关闭模块并恢复系统", "停止全部限制，移动数据交还系统", this::shutdownSheet);
+    note(p, "版本 " + BuildConfig.VERSION_NAME);
   }
 
   void limitsHelp() {
@@ -1962,9 +2033,16 @@ public final class MainActivity extends Activity {
       metric(s.content, "卡槽", "卡 " + slot);
       metric(s.content, "运营商", provider(c));
       metric(s.content, "识别依据", c.optString("carrierSource", "等待更新"));
+      metric(
+          s.content,
+          "号码归属地",
+          c.optString("province").isEmpty()
+              ? "未识别"
+              : c.optString("province")
+                  + ("iccid".equals(c.optString("provinceSource")) ? " · 按卡片编号" : " · 按号码"));
       metric(s.content, "SIM MCC/MNC", c.optString("mccMnc", "—"));
       metric(s.content, "Carrier ID", "" + c.optInt("carrierId", -1));
-      note(s.content, "若系统无法确认则显示未知或其他运营商；不会根据手机号码或漫游网络猜测。");
+      note(s.content, "运营商按 SIM 标识识别，系统无法确认时显示未知，不按号段或漫游网络猜测。归属地按本卡号码查询系统号码库，SIM 不提供号码时按中国移动卡片编号识别。");
       s.primary("知道了", s::dismiss).show();
     } catch (Exception e) {
       showMessage("识别暂不可用", safeError(e));
@@ -2019,7 +2097,7 @@ public final class MainActivity extends Activity {
             });
     }
     if (!any) note(s.content, "未检测到可用 SIM。插入或启用 SIM 后自动识别。");
-    note(s.content, "顶部“上网卡”可以一键切换并开启数据。");
+    note(s.content, "右上角的卡 1／卡 2 按钮可以一键切换并开启数据，长按打开此面板。");
     ui.divider(s.content);
     metric(s.content, "当前移动数据", status.optBoolean("dataOn") ? "开启" : "关闭");
     note(
@@ -3309,35 +3387,40 @@ public final class MainActivity extends Activity {
   }
 
   void logs() {
-    LinearLayout p = panel();
-    ui.section(p, "操作日志", "清空", this::clearLogsSheet);
+    LinearLayout head = ui.column();
+    head.setPadding(dp(4), 0, 0, 0);
+    ui.section(head, "操作日志", "清空", this::clearLogsSheet);
+    body.addView(head);
     LinearLayout filters = new LinearLayout(this);
+    filters.setPadding(dp(3), dp(3), dp(3), dp(3));
+    filters.setBackground(ui.shape(ui.surface, 16));
     String[] keys = {"all", "protection", "query", "settings"}, labels = {"全部", "保护", "查询", "设置"};
     for (int i = 0; i < keys.length; i++) {
       String key = keys[i];
-      TextView t = ui.text(labels[i], 12, key.equals(logFilter) ? ui.accent : ui.muted);
+      boolean on = key.equals(logFilter);
+      TextView t = ui.text(labels[i], 13, on ? (ui.dark ? 0xff1b2746 : Color.WHITE) : ui.muted);
       t.setGravity(Gravity.CENTER);
-      t.setPadding(dp(4), dp(10), dp(4), dp(10));
-      t.setBackground(ui.ripple(key.equals(logFilter) ? ui.soft : ui.bg, 18));
-      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
-      lp.setMargins(dp(2), dp(10), dp(2), 0);
-      filters.addView(t, lp);
+      t.setBackground(ui.ripple(on ? ui.accent : ui.surface, 13));
+      filters.addView(t, new LinearLayout.LayoutParams(0, dp(38), 1));
       t.setOnClickListener(v -> {
         logFilter = key;
         render();
       });
     }
-    p.addView(filters);
+    body.addView(filters);
+    ui.space(body, 4);
     JSONArray events = status.optJSONArray("events");
     int shown = 0;
+    LinearLayout p = null;
     if (events != null)
       for (int i = events.length() - 1; i >= 0; i--) {
         JSONObject e = events.optJSONObject(i);
         if (e == null
             || (!logFilter.equals("all")
                 && !e.optString("category", "protection").equals(logFilter))) continue;
+        if (p == null) p = panel();
+        else ui.divider(p);
         shown++;
-        p = panel();
         String category =
             switch (e.optString("category", "protection")) {
               case "query" -> "查询";
@@ -3349,7 +3432,8 @@ public final class MainActivity extends Activity {
             ui.chip(
                 category + (warning ? " · 需处理" : "") + " · " + time(e.optLong("at")),
                 warning ? ui.warn : ui.accent,
-                ui.soft));
+                ui.soft),
+            new LinearLayout.LayoutParams(-2, -2));
         if (!e.optString("title").isEmpty())
           title(p, GuardStore.cleanMessage(e.optString("title")));
         note(p, GuardStore.cleanMessage(e.optString("message")));
@@ -3420,8 +3504,8 @@ public final class MainActivity extends Activity {
       }
       // Reading the official balance needs the carrier's app in scope too.
       for (int i = 0; i < cards.length(); i++)
-        if ("mobile".equals(cards.getJSONObject(i).optString("carrierCode"))
-            && installed(Platform.MOBILE_APP)) apps.add(Platform.MOBILE_APP);
+        if (cards.getJSONObject(i).optBoolean("jiangsuApp") && installed(Platform.MOBILE_APP))
+          apps.add(Platform.MOBILE_APP);
       // A rule executor is observed without assigning all of its traffic to a package.
       if (hasRules)
         try {

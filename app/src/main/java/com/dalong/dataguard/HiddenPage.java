@@ -231,7 +231,7 @@ final class HiddenPage {
         if (!"mobile".equals(card.optString("carrierCode"))
             || now - c.optLong("mobileAttemptAt") < interval
             || (latest != null && now - latest.optLong("fetchedAt") < interval)) continue;
-        boolean page = route != null && daemon.queryRouteUsable();
+        boolean page = route != null && daemon.queryRouteUsable() && daemon.jiangsuApp(card);
         JSONObject webCard = daemon.store.data.optJSONObject("webCard");
         boolean web = webCard != null && id.equals(webCard.optString("identity"));
         if (!web && !page && !c.optBoolean("smsSync")) continue;

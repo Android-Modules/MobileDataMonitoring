@@ -229,7 +229,8 @@ final class GuardUi {
             new int[][] {{android.R.attr.state_checked}, {}}, new int[] {accent, muted}));
     control.setTrackTintList(
         new ColorStateList(
-            new int[][] {{android.R.attr.state_checked}, {}}, new int[] {soft, line}));
+            new int[][] {{android.R.attr.state_checked}, {}},
+            new int[] {(accent & 0x00ffffff) | 0x66000000, (muted & 0x00ffffff) | 0x44000000}));
     p.addView(control, new LinearLayout.LayoutParams(-1, -2));
     return control;
   }

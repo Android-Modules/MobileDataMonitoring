@@ -5,6 +5,7 @@ import android.content.*;
 import android.net.*;
 import android.telephony.*;
 import com.dalong.dataguard.core.CarrierIdentity;
+import com.dalong.dataguard.core.HomeRegion;
 import com.dalong.dataguard.core.PhoneIdentity;
 import java.lang.reflect.*;
 import java.nio.file.*;
@@ -79,6 +80,11 @@ public final class Platform {
         phone = PhoneIdentity.normalize(subscriptions.getPhoneNumber(s.getSubscriptionId()));
       } catch (RuntimeException ignored) {
       }
+      String province = province(phone), regionSource = province.isEmpty() ? "" : "number";
+      if (province.isEmpty() && "mobile".equals(provider.code())) {
+        province = HomeRegion.fromMobileIccid(icc);
+        if (!province.isEmpty()) regionSource = "iccid";
+      }
       result.put(
           new JSONObject()
               .put("slot", s.getSimSlotIndex() + 1)
@@ -92,6 +98,8 @@ public final class Platform {
               .put("numberMasked", PhoneIdentity.masked(phone))
               .put("numberKey", phone.isEmpty() ? "" : hash(phone))
               .put("numberSource", phone.isEmpty() ? "" : "sim")
+              .put("province", province)
+              .put("provinceSource", regionSource)
               .put("carrier", s.getCarrierName())
               .put(
                   "active",
@@ -101,6 +109,33 @@ public final class Platform {
                   s.getSubscriptionId() == SubscriptionManager.getDefaultDataSubscriptionId()));
     }
     return result;
+  }
+
+  static final Map<String, String> provinces = new java.util.concurrent.ConcurrentHashMap<>();
+
+  static String province(String phone) {
+    if (phone == null || phone.isEmpty()) return "";
+    return provinces.computeIfAbsent(phone, Platform::geocode);
+  }
+
+  /** The platform's offline geocoder, which ships with the Chinese mobile-prefix table. */
+  static String geocode(String phone) {
+    try {
+      Class<?> util = Class.forName("com.android.i18n.phonenumbers.PhoneNumberUtil"),
+          number = Class.forName("com.android.i18n.phonenumbers.Phonenumber$PhoneNumber"),
+          geocoder =
+              Class.forName("com.android.i18n.phonenumbers.geocoding.PhoneNumberOfflineGeocoder");
+      Object parsed =
+          util.getMethod("parse", CharSequence.class, String.class)
+              .invoke(util.getMethod("getInstance").invoke(null), phone, "CN");
+      Object text =
+          geocoder
+              .getMethod("getDescriptionForNumber", number, java.util.Locale.class)
+              .invoke(geocoder.getMethod("getInstance").invoke(null), parsed, java.util.Locale.SIMPLIFIED_CHINESE);
+      return HomeRegion.fromDescription((String) text);
+    } catch (ReflectiveOperationException | RuntimeException e) {
+      return "";
+    }
   }
 
   public int defaultSub() {

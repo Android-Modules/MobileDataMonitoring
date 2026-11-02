@@ -205,7 +205,7 @@ final class GuardDaemon {
           case "stop", "dismissDirected" -> "关闭移动数据未完成";
           case "calibrateDirected" -> "定向已用量设置未完成";
           case "calibrate" -> "通用用量校准未完成";
-          case "officialRefresh", "refreshCurrent", "smsQuery", "mobileWeb" -> "更新余量未完成";
+          case "officialRefresh", "refreshCurrent", "smsQuery", "mobileWeb", "openJiangsuApp" -> "更新余量未完成";
           case "clearLogs" -> "清空日志未完成";
           default -> "操作未完成";
         };
@@ -369,6 +369,12 @@ final class GuardDaemon {
           OfficialClient.refreshOrOpen(this, requested);
         if (r.optBoolean("official") && "mobile".equals(requested.optString("carrierCode")))
           OfficialClient.openMobile(this, requested);
+        break;
+      case "openJiangsuApp":
+        JSONObject appCard = card(r.getInt("slot"));
+        if (!appCard.getString("identity").equals(r.getString("identity")))
+          throw new SecurityException("SIM 已变化，请重新选择");
+        OfficialClient.openMobileApp(this, appCard, true);
         break;
       case "flow":
         observe(r);
@@ -703,7 +709,8 @@ final class GuardDaemon {
     JSONObject c = cardConfig(live);
     c.put("numberKey", Platform.hash(phone))
         .put("numberMasked", PhoneIdentity.masked(phone))
-        .put("numberSource", "user");
+        .put("numberSource", "user")
+        .put("province", Platform.province(phone));
     store.event("卡 " + r.getInt("slot") + " 的号码已关联，日志仅保留脱敏标识");
   }
 
@@ -1507,6 +1514,28 @@ final class GuardDaemon {
         .put("outsideAlerts", store.data.optJSONObject("outsideAlerts"));
   }
 
+  /** The SIM's own number first, then a number the user bound, then the ICCID. */
+  static String[] region(JSONObject card, JSONObject config) {
+    if ("number".equals(card.optString("provinceSource")))
+      return new String[] {card.optString("province"), "number"};
+    if ("user".equals(config.optString("numberSource")) && !config.optString("province").isEmpty())
+      return new String[] {config.optString("province"), "number"};
+    return new String[] {card.optString("province"), card.optString("provinceSource")};
+  }
+
+  /** Only Jiangsu numbers can sign in to the Jiangsu app; an unknown region needs a past read. */
+  boolean jiangsuApp(JSONObject card) throws Exception {
+    JSONObject config = cardConfig(card);
+    String id = card.getString("identity");
+    boolean proven =
+        config.has("officialUser")
+            || OfficialClient.mobileRoute(store.data.optJSONObject("mobileRoutes"), id) != null;
+    String[] region = region(card, config);
+    // The number's region is authoritative; one inferred from the ICCID yields to a read that worked.
+    if (proven && !"number".equals(region[1])) region[0] = "";
+    return HomeRegion.jiangsuApp(card.optString("carrierCode"), region[0], proven);
+  }
+
   synchronized JSONObject status() throws Exception {
     JSONArray out = new JSONArray();
     for (int i = 0; i < cards.length(); i++) {
@@ -1517,6 +1546,10 @@ final class GuardDaemon {
         card.put("numberKey", config.optString("numberKey"))
             .put("numberMasked", config.optString("numberMasked"))
             .put("numberSource", config.optString("numberSource"));
+      String[] region = region(card, config);
+      card.put("province", region[0])
+          .put("provinceSource", region[1])
+          .put("jiangsuApp", jiangsuApp(card));
       card.put("config", config)
           .put("usage", u == null ? new JSONObject() : u)
           .put("remaining", remaining(config, u));

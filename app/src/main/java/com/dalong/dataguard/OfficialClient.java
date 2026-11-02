@@ -649,7 +649,7 @@ final class OfficialClient {
     String id = card.getString("identity");
     JSONObject webCard = daemon.store.data.optJSONObject("webCard");
     if (webCard == null || !id.equals(webCard.optString("identity"))) {
-      openMobileApp(daemon, card);
+      appOrSms(daemon, card);
       return;
     }
     queryState(daemon, id, "waiting", "正在通过网上营业厅读取本卡余量", System.currentTimeMillis());
@@ -665,7 +665,7 @@ final class OfficialClient {
               if (!done)
                 synchronized (daemon) {
                   try {
-                    openMobileApp(daemon, daemon.findCardByIdentity(id));
+                    appOrSms(daemon, daemon.findCardByIdentity(id));
                   } catch (Exception e) {
                     try {
                       queryState(
@@ -683,21 +683,37 @@ final class OfficialClient {
         .start();
   }
 
-  static void openMobileApp(GuardDaemon daemon, JSONObject card) throws Exception {
+  /** Outside Jiangsu the Jiangsu app cannot sign in; the SMS query is the remaining route. */
+  static void appOrSms(GuardDaemon daemon, JSONObject card) throws Exception {
+    if (daemon.jiangsuApp(card)) openMobileApp(daemon, card, false);
+    else if (daemon.cardConfig(card).optBoolean("smsSync"))
+      SmsSync.refresh(daemon, card.getString("identity"));
+    else throw new IllegalArgumentException("本卡不是江苏移动号码，请登录网上营业厅，或发短信查询");
+  }
+
+  static void openMobileApp(GuardDaemon daemon, JSONObject card, boolean visible) throws Exception {
     String id = card.getString("identity");
+    if (!daemon.jiangsuApp(card)) throw new IllegalArgumentException("中国移动江苏 App 只支持江苏移动号码");
     JSONObject c = daemon.cardConfig(card);
     int user = c.optInt("officialUser", 0);
     JSONObject route = mobileRoute(daemon.store.data.optJSONObject("mobileRoutes"), id);
-    if (route != null) {
+    if (route != null && !visible) {
       queryState(daemon, id, "waiting", "正在后台读取本卡官方余量", System.currentTimeMillis());
       daemon.store.save();
       HiddenPage.refresh(daemon, id, user, route);
       return;
     }
-    queryState(daemon, id, "waiting", "已打开本卡官方应用，请点击流量进入余量查询", System.currentTimeMillis());
+    queryState(
+        daemon,
+        id,
+        "waiting",
+        route != null
+            ? "已打开中国移动江苏 App 余量查询，页面加载后自动读取"
+            : "已打开中国移动江苏 App，请点击流量进入余量查询",
+        System.currentTimeMillis());
     daemon.store.save();
     try {
-      daemon.platform.openMobile(user, null);
+      daemon.platform.openMobile(user, route);
     } catch (Exception e) {
       queryState(daemon, id, "error", "未能打开本卡官方应用，请从桌面进入余量查询", System.currentTimeMillis());
       daemon.store.save();

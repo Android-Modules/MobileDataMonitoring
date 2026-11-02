@@ -10,7 +10,7 @@ final class SettingsBackup {
   static final Set<String> GLOBAL =
       Set.of("mode", "enabled", "fixedSlot", "budgetEnabled", "budgetLimit", "pauseOnWifi", "scheduleHours");
   static final Set<String> CARD =
-      Set.of("alias", "cycleDay", "reserve", "numberKey", "numberMasked", "numberSource");
+      Set.of("alias", "cycleDay", "reserve", "numberKey", "numberMasked", "numberSource", "province");
   static final Set<String> VOLATILE_PACK =
       Set.of("officialBalance", "manualUsage", "officialPackageId", "expires");
 
