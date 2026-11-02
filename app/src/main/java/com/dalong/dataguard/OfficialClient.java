@@ -653,10 +653,10 @@ final class OfficialClient {
   }
 
   /** A card signed in on the web service hall is read there first, then through the app. */
-  static void openMobile(GuardDaemon daemon, JSONObject card) throws Exception {
+  static void openMobile(GuardDaemon daemon, JSONObject card, boolean skipWeb) throws Exception {
     String id = card.getString("identity");
     JSONObject webCard = daemon.store.data.optJSONObject("webCard");
-    if (webCard == null || !id.equals(webCard.optString("identity"))) {
+    if (skipWeb || webCard == null || !id.equals(webCard.optString("identity"))) {
       appOrSms(daemon, card);
       return;
     }

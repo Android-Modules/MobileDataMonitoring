@@ -402,7 +402,7 @@ final class GuardDaemon {
         if (r.optBoolean("official") && "unicom".equals(requested.optString("carrierCode")))
           OfficialClient.refreshOrOpen(this, requested);
         if (r.optBoolean("official") && "mobile".equals(requested.optString("carrierCode")))
-          OfficialClient.openMobile(this, requested);
+          OfficialClient.openMobile(this, requested, r.optBoolean("skipWeb"));
         break;
       case "openJiangsuApp":
         JSONObject appCard = card(r.getInt("slot"));

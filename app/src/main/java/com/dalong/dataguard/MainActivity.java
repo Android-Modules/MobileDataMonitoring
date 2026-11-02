@@ -1414,7 +1414,7 @@ public final class MainActivity extends Activity {
             .apply();
       if (official && carrier.equals("mobile") && MobileWeb.usable(this, identity))
         webRefresh(target, identity);
-      else rootRefresh(target, identity, official);
+      else rootRefresh(target, identity, official, false);
     } catch (Exception e) {
       showMessage("暂时无法更新", safeError(e));
     }
@@ -1439,7 +1439,8 @@ public final class MainActivity extends Activity {
                 "login".equals(error)
                     ? "网上营业厅登录已失效，" + next
                     : "网上营业厅暂未响应，" + next);
-            rootRefresh(target, identity, true);
+            // The web page just failed here; the worker goes straight to the next route.
+            rootRefresh(target, identity, true, true);
             return;
           }
           io.execute(() -> {
@@ -1463,7 +1464,7 @@ public final class MainActivity extends Activity {
         });
   }
 
-  void rootRefresh(int target, String identity, boolean official) {
+  void rootRefresh(int target, String identity, boolean official, boolean skipWeb) {
     try {
       io.execute(() -> {
         try {
@@ -1473,7 +1474,8 @@ public final class MainActivity extends Activity {
                       .put("action", "refreshCurrent")
                       .put("slot", target)
                       .put("identity", identity)
-                      .put("official", official));
+                      .put("official", official)
+                      .put("skipWeb", skipWeb));
           main.post(() -> {
             busy = false;
             if (isDestroyed()) return;
