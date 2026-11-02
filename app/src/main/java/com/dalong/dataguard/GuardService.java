@@ -12,6 +12,7 @@ public final class GuardService extends Service {
   String lastNotification;
   String lastPending;
   volatile boolean pauseOnWifi = true;
+
   final Handler main = new Handler(Looper.getMainLooper());
   final Set<String> activeWarnings = ConcurrentHashMap.newKeySet();
 

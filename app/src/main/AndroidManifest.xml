@@ -14,6 +14,8 @@
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" /></intent-filter>
         </activity>
         <activity android:name=".DirectedPromptActivity" android:exported="false" android:theme="@style/PromptTheme" android:taskAffinity="" android:launchMode="singleTask" android:excludeFromRecents="true" android:configChanges="orientation|screenSize" />
+        <activity android:name=".WebReadActivity" android:exported="false" android:taskAffinity="" android:excludeFromRecents="true" android:noHistory="true" />
+        <activity android:name=".WebLoginActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" android:windowSoftInputMode="adjustResize" />
         <service android:name=".GuardService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="用户启用的双卡流量监控及额度保护" />
         </service>

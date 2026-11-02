@@ -27,7 +27,7 @@ public final class MainActivity extends Activity {
   TextView statusLine;
   JSONObject status;
   int slot = 2, tab;
-  boolean busy, foreground;
+  boolean busy, foreground, webReading;
   boolean initialCard = true;
   long lastTouch;
   String logFilter = "all";
@@ -874,7 +874,9 @@ public final class MainActivity extends Activity {
           p,
           "sms".equals(official.optString("sourceMode"))
               ? "短信查询 · 运营商统计截至 " + time(official.optLong("queryAt"))
-              : "官方获取时间 · " + time(official.optLong("fetchedAt")));
+              : "web".equals(official.optString("sourceMode"))
+                  ? "网上营业厅 · 统计截至 " + time(official.optLong("queryAt"))
+                  : "官方获取时间 · " + time(official.optLong("fetchedAt")));
       if (System.currentTimeMillis() - official.optLong("fetchedAt") > 86400000L)
         note(p, "官方数据已超过 1 天未更新，可能需要重新登录官方 App。");
       note(p, "定向余额按各包相加，不同包不可互抵。各包余额见下方明细。");
@@ -962,6 +964,19 @@ public final class MainActivity extends Activity {
     if (officialSource().equals("mobile"))
       ui.row(
           s.content,
+          "shield",
+          "登录网上营业厅",
+          "用短信验证码登录，之后不需要官方 App",
+          () -> {
+            s.dismiss();
+            try {
+              openWebLogin(selected());
+            } catch (Exception ignored) {
+            }
+          });
+    if (officialSource().equals("mobile"))
+      ui.row(
+          s.content,
           "refresh",
           "发短信查询",
           "不需要 App 登录",
@@ -997,6 +1012,7 @@ public final class MainActivity extends Activity {
       note(s.content, "3. 用本卡号码登录，点击流量进入“余量查询”一次。");
       note(s.content, "之后一键更新和定时都在后台读取，不影响屏幕，熄屏也能运行。");
       note(s.content, "登录过期时可以用短信查询：向 10086 发送 CXLL，回复里有通用、定向和套外用量，不需要 App 登录。");
+      note(s.content, "也可以在“网上营业厅”用本卡号码和短信验证码登录。之后一键更新和定时查询都在模块里完成，不需要官方 App；登录状态只保存在本机，失效时会提示重新登录。");
     } else note(s.content, "此运营商暂未接入官方查询，请手动设置流量。");
     s.primary("知道了", s::dismiss).show();
   }
@@ -1164,10 +1180,26 @@ public final class MainActivity extends Activity {
       if (framework != null && !framework.getScope().contains(Platform.MOBILE_APP))
         ui.row(p, "shield", "授权读取中国移动江苏 App", "向 LSPosed 申请作用域，批准后才能读取余量", this::requestAppScopes);
       officialButton(p);
-      note(p, "在后台读取官方余量页，不影响屏幕，熄屏也能定时更新。首次需在官方 App 点击流量进入余量查询一次；登录过期时可用短信查询。");
+      note(
+          p,
+          MobileWeb.usable(this, card.getString("identity"))
+              ? "通过网上营业厅在后台查询，不需要官方 App，熄屏也能定时更新；登录失效时改用官方 App 隐藏页或短信。"
+              : "在后台读取官方余量页，不影响屏幕，熄屏也能定时更新。首次需在官方 App 点击流量进入余量查询一次；登录过期时可用短信查询。");
       JSONObject queries = status.optJSONObject("officialQueries");
       JSONObject query = queries == null ? null : queries.optJSONObject(card.getString("identity"));
       if (query != null) note(p, query.optString("message") + " · " + time(query.optLong("at")));
+      String webCard = MobileWeb.identity(this);
+      boolean webHere = webCard.equals(card.getString("identity"));
+      ui.row(
+          p,
+          "shield",
+          "网上营业厅",
+          !webHere
+              ? "登录后一键更新和定时查询都不需要官方 App，全国移动号码可用"
+              : MobileWeb.prefs(this).getBoolean("expired", false)
+                  ? "登录已失效，点此重新登录"
+                  : "已登录 " + MobileWeb.prefs(this).getString("telephone", "") + " · 优先使用",
+          () -> webSheet(card));
       scheduleRow(p);
       ui.row(p, "refresh", "发短信查询", "向 10086 发送 CXLL，不需要 App 登录", this::smsQuery);
       Switch auto =
@@ -1261,6 +1293,58 @@ public final class MainActivity extends Activity {
             .putString("officialPending", identity)
             .putLong("officialPendingAt", System.currentTimeMillis())
             .apply();
+      if (official && carrier.equals("mobile") && MobileWeb.usable(this, identity))
+        webRefresh(target, identity);
+      else rootRefresh(target, identity, official);
+    } catch (Exception e) {
+      showMessage("暂时无法更新", safeError(e));
+    }
+  }
+
+  /** The web service hall first; a lapsed login or a silent page falls back to the app route. */
+  void webRefresh(int target, String identity) {
+    webReading = true;
+    render();
+    toast("正在通过网上营业厅查询");
+    MobileWeb.read(
+        this,
+        (page, error) -> {
+          if (page == null) {
+            webReading = false;
+            if ("login".equals(error)) {
+              MobileWeb.expire(this);
+              MobileWeb.lost(identity);
+            }
+            toast(
+                "login".equals(error)
+                    ? "网上营业厅登录已失效，改用官方 App 读取"
+                    : "网上营业厅暂未响应，改用官方 App 读取");
+            rootRefresh(target, identity, true);
+            return;
+          }
+          io.execute(() -> {
+            try {
+              MobileWeb.submit(identity, page);
+              MobileWeb.remember(this, identity, page.optString("telephone"));
+              main.post(() -> {
+                webReading = false;
+                busy = false;
+                if (!isDestroyed()) load(false, true);
+              });
+            } catch (Exception e) {
+              main.post(() -> {
+                webReading = false;
+                busy = false;
+                getPreferences(0).edit().remove("officialPending").apply();
+                if (!isDestroyed()) officialFailed(safeError(e));
+              });
+            }
+          });
+        });
+  }
+
+  void rootRefresh(int target, String identity, boolean official) {
+    try {
       io.execute(() -> {
         try {
           JSONObject result =
@@ -1295,6 +1379,56 @@ public final class MainActivity extends Activity {
     }
   }
 
+  void webSheet(JSONObject card) {
+    try {
+      String identity = card.getString("identity");
+      if (!MobileWeb.identity(this).equals(identity)) {
+        openWebLogin(card);
+        return;
+      }
+      GuardUi.Sheet s =
+          ui.sheet("网上营业厅", "卡 " + card.getInt("slot") + " · " + MobileWeb.prefs(this).getString("telephone", ""));
+      ui.row(
+          s.content,
+          "shield",
+          "打开网上营业厅",
+          "登录失效时在这里重新登录",
+          () -> {
+            s.dismiss();
+            openWebLogin(card);
+          });
+      ui.row(
+          s.content,
+          "stop",
+          "退出登录",
+          "清除本机保存的登录状态，后台改用官方 App 或短信",
+          () -> {
+            s.dismiss();
+            android.webkit.CookieManager.getInstance().removeAllCookies(null);
+            android.webkit.CookieManager.getInstance().flush();
+            android.webkit.WebStorage.getInstance().deleteAllData();
+            MobileWeb.prefs(this).edit().clear().apply();
+            MobileWeb.lost(identity);
+            toast("已退出网上营业厅");
+            render();
+          });
+      s.primary("关闭", s::dismiss).show();
+    } catch (Exception e) {
+      showMessage("暂时无法打开", safeError(e));
+    }
+  }
+
+  void openWebLogin(JSONObject card) {
+    try {
+      startActivity(
+          new Intent(this, WebLoginActivity.class)
+              .putExtra("identity", card.getString("identity"))
+              .putExtra("slot", card.getInt("slot")));
+    } catch (Exception e) {
+      showMessage("暂时无法打开", safeError(e));
+    }
+  }
+
   /** While a read runs the button says so, instead of looking as if nothing happened. */
   void officialButton(LinearLayout p) {
     boolean reading = officialReading();
@@ -1309,6 +1443,7 @@ public final class MainActivity extends Activity {
   }
 
   boolean officialReading() {
+    if (webReading) return true;
     try {
       String id = selected().getString("identity");
       JSONObject queries = status == null ? null : status.optJSONObject("officialQueries");

@@ -3,6 +3,8 @@ package com.dalong.dataguard;
 import com.dalong.dataguard.core.OfficialTotals;
 import com.dalong.dataguard.core.OutsidePlan;
 import com.dalong.dataguard.core.PhoneIdentity;
+import com.dalong.dataguard.core.SmsBalance;
+import com.dalong.dataguard.core.WebMargin;
 import java.io.*;
 import java.math.*;
 import java.net.*;
@@ -393,6 +395,71 @@ final class OfficialClient {
     if (!identity.isEmpty()) syncOutside(daemon, identity, parsed);
   }
 
+  /** Figures read from the web service hall by the app; applied only to the card they name. */
+  static void mobileWeb(GuardDaemon daemon, JSONObject r) throws Exception {
+    JSONObject card = daemon.findCardByIdentity(r.getString("identity"));
+    if (!"mobile".equals(card.optString("carrierCode")))
+      throw new IllegalArgumentException("网上营业厅查询只用于中国移动号码");
+    String masked = card.optString("numberMasked");
+    if (masked.isEmpty()) masked = daemon.cardConfig(card).optString("numberMasked");
+    if (!WebMargin.sameNumber(r.optString("telephone"), masked))
+      throw new SecurityException("网上营业厅登录号码与卡 " + card.optInt("slot") + " 不一致，未应用余量");
+    for (int i = 0; i < daemon.cards.length(); i++) {
+      JSONObject other = daemon.cards.getJSONObject(i);
+      String m = other.optString("numberMasked");
+      if (m.isEmpty()) m = daemon.cardConfig(other).optString("numberMasked");
+      if (other != card && "mobile".equals(other.optString("carrierCode")) && masked.equals(m))
+        throw new SecurityException("两张卡的脱敏号码相同，无法区分网上营业厅账号");
+    }
+    JSONObject flow = r.getJSONObject("flow");
+    JSONObject general = flow.getJSONObject("planRemian"),
+        other = flow.optJSONObject("otherRemian"),
+        outside = flow.optJSONObject("outUsedInfo");
+    long now = System.currentTimeMillis();
+    SmsSync.apply(
+        daemon,
+        card.getString("identity"),
+        new SmsBalance.Result(
+            web(general),
+            other == null ? null : web(other),
+            outside == null
+                ? 0
+                : Math.max(0, WebMargin.bytes(outside.optString("usedNum"), outside.optString("unit"))),
+            WebMargin.cutoff(r.optString("oprTime"), now),
+            List.of()),
+        "web");
+    // From now on this card's unattended updates go through the web service hall first.
+    daemon
+        .store
+        .data
+        .put("webCard", new JSONObject().put("identity", card.getString("identity")).put("at", now));
+  }
+
+  static void mobileWebLost(GuardDaemon daemon, JSONObject r) throws Exception {
+    JSONObject card = daemon.store.data.optJSONObject("webCard");
+    if (card == null || !card.optString("identity").equals(r.optString("identity"))) return;
+    daemon.store.data.remove("webCard");
+    queryState(
+        daemon,
+        card.optString("identity"),
+        "error",
+        slotLabel(daemon, card.optString("identity")) + "网上营业厅登录已失效，请在校准页重新登录",
+        System.currentTimeMillis());
+    daemon.store.event(
+        "query",
+        "网上营业厅登录已失效",
+        "后台查询改用官方 App 隐藏页或短信。需要时在校准 → 网上营业厅重新登录。",
+        "");
+  }
+
+  static SmsBalance.Usage web(JSONObject row) {
+    return WebMargin.usage(
+        row.optString("usedNum"),
+        row.optString("remainNum"),
+        row.optString("sumNum"),
+        row.optString("unit"));
+  }
+
   /** Paid traffic beyond the plan, normalized from the carrier's separate list. */
   static JSONArray outside(JSONObject snapshot) throws Exception {
     JSONArray raw = snapshot.optJSONArray("outsidePlan"), rows = new JSONArray();
@@ -577,7 +644,46 @@ final class OfficialClient {
     return route != null && Platform.MOBILE_APP.equals(route.optString("package")) ? route : null;
   }
 
+  /** A card signed in on the web service hall is read there first, then through the app. */
   static void openMobile(GuardDaemon daemon, JSONObject card) throws Exception {
+    String id = card.getString("identity");
+    JSONObject webCard = daemon.store.data.optJSONObject("webCard");
+    if (webCard == null || !id.equals(webCard.optString("identity"))) {
+      openMobileApp(daemon, card);
+      return;
+    }
+    queryState(daemon, id, "waiting", "正在通过网上营业厅读取本卡余量", System.currentTimeMillis());
+    daemon.store.save();
+    new Thread(
+            () -> {
+              boolean done = false;
+              try {
+                done = HiddenPage.web(daemon, id);
+              } catch (Exception unsupported) {
+                // The official app route below still applies.
+              }
+              if (!done)
+                synchronized (daemon) {
+                  try {
+                    openMobileApp(daemon, daemon.findCardByIdentity(id));
+                  } catch (Exception e) {
+                    try {
+                      queryState(
+                          daemon,
+                          id,
+                          "error",
+                          "未能读取官方余量：" + GuardDaemon.safeMessage(e),
+                          System.currentTimeMillis());
+                    } catch (Exception ignored) {
+                    }
+                  }
+                }
+            },
+            "mobile-web")
+        .start();
+  }
+
+  static void openMobileApp(GuardDaemon daemon, JSONObject card) throws Exception {
     String id = card.getString("identity");
     JSONObject c = daemon.cardConfig(card);
     int user = c.optInt("officialUser", 0);

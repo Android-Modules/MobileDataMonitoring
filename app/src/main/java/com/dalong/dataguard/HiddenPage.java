@@ -39,12 +39,23 @@ final class HiddenPage {
     }
   }
 
-  /** Blocks until the page has reported this card's balance or the wait runs out. */
+  interface Launch {
+    void at(int display) throws Exception;
+  }
+
+  /**
+   * Runs a page on a fresh hidden display until this card's balance arrives, the page gives up,
+   * or the wait runs out. The device may be asleep: the whole read finishes under a wake lock.
+   */
   @android.annotation.SuppressLint("WrongConstant") // The hidden flags need the root caller.
-  static boolean read(GuardDaemon daemon, String identity, int user, JSONObject route)
+  static boolean onDisplay(
+      GuardDaemon daemon,
+      String identity,
+      long waitMs,
+      Launch launch,
+      java.util.function.LongPredicate gaveUp)
       throws Exception {
     long since = System.currentTimeMillis();
-    // The device may be asleep: the whole read has to finish before it suspends again.
     var wake =
         daemon
             .platform
@@ -52,7 +63,7 @@ final class HiddenPage {
             .getSystemService(PowerManager.class)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "dataguard:query");
     wake.setReferenceCounted(false);
-    wake.acquire(LOAD_MS + 5000);
+    wake.acquire(waitMs + 5000);
     HandlerThread frames = new HandlerThread("hidden-page");
     frames.start();
     ImageReader reader = ImageReader.newInstance(720, 1600, PixelFormat.RGBA_8888, 2);
@@ -69,7 +80,27 @@ final class HiddenPage {
             .context
             .getSystemService(DisplayManager.class)
             .createVirtualDisplay("DataGuardQuery", 720, 1600, 320, reader.getSurface(), FLAGS);
-    Set<Integer> tasks = new HashSet<>();
+    try {
+      launch.at(display.getDisplay().getDisplayId());
+      long deadline = SystemClock.elapsedRealtime() + waitMs;
+      while (SystemClock.elapsedRealtime() < deadline) {
+        if (queryUpdated(daemon, identity, since)) return true;
+        if (gaveUp.test(since)) return false;
+        Thread.sleep(1000);
+      }
+      return false;
+    } finally {
+      display.release();
+      reader.close();
+      frames.quitSafely();
+      wake.release();
+    }
+  }
+
+  /** The official app's balance page; a login screen ends the wait at once. */
+  static boolean read(GuardDaemon daemon, String identity, int user, JSONObject route)
+      throws Exception {
+    Set<Integer> tasks;
     boolean wasRunning = true;
     try {
       tasks = daemon.platform.appTasks(Platform.MOBILE_APP, user);
@@ -79,20 +110,14 @@ final class HiddenPage {
       tasks = null;
     }
     try {
-      daemon.platform.openMobile(user, route, display.getDisplay().getDisplayId());
-      long deadline = SystemClock.elapsedRealtime() + LOAD_MS;
-      while (SystemClock.elapsedRealtime() < deadline) {
-        if (queryUpdated(daemon, identity, since)) return true;
-        if (loginAt >= since) return false;
-        Thread.sleep(1000);
-      }
-      return false;
+      return onDisplay(
+          daemon,
+          identity,
+          LOAD_MS,
+          d -> daemon.platform.openMobile(user, route, d),
+          since -> loginAt >= since);
     } finally {
-      display.release();
-      reader.close();
-      frames.quitSafely();
-      cleanUp(daemon, user, tasks, wasRunning);
-      wake.release();
+      cleanUp(daemon, Platform.MOBILE_APP, user, tasks, wasRunning);
     }
   }
 
@@ -100,12 +125,13 @@ final class HiddenPage {
    * Each read opens a task of its own; it is removed afterwards, and an app that was not running
    * before is stopped again. Tasks the user already had are left alone.
    */
-  static void cleanUp(GuardDaemon daemon, int user, Set<Integer> before, boolean wasRunning) {
+  static void cleanUp(
+      GuardDaemon daemon, String pkg, int user, Set<Integer> before, boolean wasRunning) {
     if (before == null) return;
     try {
-      for (int id : daemon.platform.appTasks(Platform.MOBILE_APP, user))
+      for (int id : daemon.platform.appTasks(pkg, user))
         if (!before.contains(id)) daemon.platform.removeTask(id);
-      if (!wasRunning) daemon.platform.forceStop(Platform.MOBILE_APP, user);
+      if (!wasRunning) daemon.platform.forceStop(pkg, user);
     } catch (Exception keep) {
     }
   }
@@ -158,23 +184,60 @@ final class HiddenPage {
         .start();
   }
 
+  /**
+   * The web service hall, read by this app's own page on a hidden display: an activity start
+   * works while the phone sleeps, where a background service start may be refused.
+   */
+  static boolean web(GuardDaemon daemon, String identity) throws Exception {
+    String self = "com.dalong.dataguard";
+    Set<Integer> tasks;
+    try {
+      tasks = daemon.platform.appTasks(self, 0);
+    } catch (Exception unknown) {
+      tasks = null;
+    }
+    try {
+      return onDisplay(
+          daemon,
+          identity,
+          LOAD_MS + 10000,
+          d -> daemon.platform.openWebRead(identity, d),
+          since -> {
+            synchronized (daemon) {
+              JSONObject card = daemon.store.data.optJSONObject("webCard");
+              return card == null || !identity.equals(card.optString("identity"));
+            }
+          });
+    } finally {
+      // Only the reader's own task goes; this app keeps running for its other work.
+      cleanUp(daemon, self, 0, tasks, true);
+    }
+  }
+
   /** Unattended: one quiet attempt per card and interval, with SMS as the user-enabled backup. */
   static void scheduled(GuardDaemon daemon) throws Exception {
     JSONArray due = new JSONArray();
     long now = System.currentTimeMillis();
     synchronized (daemon) {
       long interval = daemon.store.config().optInt("scheduleHours", 2) * 3600000L;
-      JSONObject routes = daemon.store.data.optJSONObject("mobileRoutes");
+      JSONObject routes = daemon.store.data.optJSONObject("mobileRoutes"),
+          fresh = OfficialClient.byCard(daemon);
       for (int i = 0; i < daemon.cards.length(); i++) {
         JSONObject card = daemon.cards.getJSONObject(i), c = daemon.cardConfig(card);
         String id = card.getString("identity");
         JSONObject route = OfficialClient.mobileRoute(routes, id);
+        JSONObject latest = fresh.optJSONObject(id);
+        // A card already updated within the interval (by the web service hall, say) is left alone.
         if (!"mobile".equals(card.optString("carrierCode"))
-            || now - c.optLong("mobileAttemptAt") < interval) continue;
+            || now - c.optLong("mobileAttemptAt") < interval
+            || (latest != null && now - latest.optLong("fetchedAt") < interval)) continue;
         boolean page = route != null && daemon.queryRouteUsable();
-        if (!page && !c.optBoolean("smsSync")) continue;
+        JSONObject webCard = daemon.store.data.optJSONObject("webCard");
+        boolean web = webCard != null && id.equals(webCard.optString("identity"));
+        if (!web && !page && !c.optBoolean("smsSync")) continue;
         c.put("mobileAttemptAt", now);
-        JSONObject item = new JSONObject().put("id", id).put("user", c.optInt("officialUser", 0));
+        JSONObject item =
+            new JSONObject().put("id", id).put("user", c.optInt("officialUser", 0)).put("web", web);
         if (page) item.put("route", route);
         due.put(item);
       }
@@ -185,7 +248,8 @@ final class HiddenPage {
       String id = item.getString("id");
       boolean done = false;
       try {
-        if (item.has("route")) {
+        if (item.optBoolean("web")) done = web(daemon, id);
+        if (!done && item.has("route")) {
           synchronized (daemon) {
             OfficialClient.queryState(daemon, id, "waiting", "正在后台更新官方余量", now);
           }

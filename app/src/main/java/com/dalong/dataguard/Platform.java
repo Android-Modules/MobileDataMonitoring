@@ -403,7 +403,8 @@ public final class Platform {
         manager
             .getClass()
             .getMethod("getRecentTasks", int.class, int.class, int.class)
-            .invoke(manager, 100, 0, user);
+            // RECENT_WITH_EXCLUDED: a reader page is excluded from recents but still a task.
+            .invoke(manager, 100, 1, user);
     Set<Integer> ids = new HashSet<>();
     for (Object o : (List<?>) slice.getClass().getMethod("getList").invoke(slice)) {
       var task = (android.app.ActivityManager.RecentTaskInfo) o;
@@ -429,6 +430,17 @@ public final class Platform {
       if (p.uid / 100000 == user && p.pkgList != null && Arrays.asList(p.pkgList).contains(pkg))
         return true;
     return false;
+  }
+
+  /** This app's own reader page for the web service hall, placed on the given display. */
+  void openWebRead(String identity, int display) throws Exception {
+    Intent intent =
+        new Intent()
+            .setComponent(new ComponentName("com.dalong.dataguard", WebReadActivity.class.getName()))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+            .putExtra("identity", identity);
+    startActivity(
+        intent, 0, android.app.ActivityOptions.makeBasic().setLaunchDisplayId(display).toBundle());
   }
 
   void forceStop(String pkg, int user) throws Exception {

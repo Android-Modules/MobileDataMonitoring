@@ -38,7 +38,7 @@ final class SmsSync {
                   if (result == null)
                     OfficialClient.queryState(
                         daemon, identity, "error", "未收到可识别的 10086 回复", System.currentTimeMillis());
-                  else apply(daemon, identity, result);
+                  else apply(daemon, identity, result, "sms");
                 }
               } catch (Throwable e) {
                 try {
@@ -67,8 +67,9 @@ final class SmsSync {
         .put("remaining", usage.remaining());
   }
 
-  /** Lays the SMS figures over the last full report, keeping package ids bound to its entries. */
-  static void apply(GuardDaemon daemon, String identity, SmsBalance.Result r) throws Exception {
+  /** Lays SMS or web figures over the last full report, keeping package ids bound to its entries. */
+  static void apply(GuardDaemon daemon, String identity, SmsBalance.Result r, String source)
+      throws Exception {
     JSONObject card = daemon.findCardByIdentity(identity), c = daemon.cardConfig(card);
     JSONObject previous = OfficialClient.byCard(daemon).optJSONObject(identity);
     String account = card.optString("numberKey");
@@ -78,7 +79,7 @@ final class SmsSync {
     JSONObject out =
         previous == null
             ? new JSONObject()
-                .put("carrier", "中国移动（短信）")
+                .put("carrier", source.equals("web") ? "中国移动（网上营业厅）" : "中国移动（短信）")
                 .put("schema", "mobile-sms-v1")
                 .put("accountKey", account)
                 .put("aggregates", new JSONObject())
@@ -121,7 +122,7 @@ final class SmsSync {
         .put("fetchedAt", now)
         .put("queryAt", r.cutoffAt())
         .put("statisticalTimeVerified", true)
-        .put("sourceMode", "sms");
+        .put("sourceMode", source);
     out.remove("boundIdentity");
     OfficialClient.remember(daemon, "mobile", out);
     OfficialClient.queryState(

@@ -8,7 +8,7 @@ val releaseSigning = Properties().apply {
 android {
     namespace = "com.dalong.dataguard"
     compileSdk { version = release(37) }
-    defaultConfig { applicationId = "com.dalong.dataguard"; minSdk = 34; targetSdk = 35; versionCode = 36; versionName = "0.8.4" }
+    defaultConfig { applicationId = "com.dalong.dataguard"; minSdk = 34; targetSdk = 35; versionCode = 37; versionName = "0.9.0" }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     buildFeatures { buildConfig = true }
     packaging { resources.excludes += setOf("META-INF/LICENSE*", "META-INF/NOTICE*") }

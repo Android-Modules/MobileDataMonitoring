@@ -205,7 +205,7 @@ final class GuardDaemon {
           case "stop", "dismissDirected" -> "关闭移动数据未完成";
           case "calibrateDirected" -> "定向已用量设置未完成";
           case "calibrate" -> "通用用量校准未完成";
-          case "officialRefresh", "refreshCurrent", "smsQuery" -> "更新余量未完成";
+          case "officialRefresh", "refreshCurrent", "smsQuery", "mobileWeb" -> "更新余量未完成";
           case "clearLogs" -> "清空日志未完成";
           default -> "操作未完成";
         };
@@ -346,6 +346,12 @@ final class GuardDaemon {
         break;
       case "mobileSnapshot":
         OfficialClient.mobileSnapshot(this, r);
+        return new JSONObject().put("ok", true);
+      case "mobileWeb":
+        OfficialClient.mobileWeb(this, r);
+        return new JSONObject().put("ok", true);
+      case "mobileWebLost":
+        OfficialClient.mobileWebLost(this, r);
         return new JSONObject().put("ok", true);
       case "mobileLogin":
         HiddenPage.loginAt = System.currentTimeMillis();
@@ -1491,6 +1497,7 @@ final class GuardDaemon {
         .put("sampleAt", sampleAt)
         .put("blockedSubs", blockedSubs())
         .put("pauseOnWifi", store.config().optBoolean("pauseOnWifi", true))
+        .put("scheduleHours", store.config().optInt("scheduleHours", 2))
         .put("wifiConnected", wifiConnected)
         .put("wifiPaused", wifiPaused)
         .put("fault", fault.isEmpty() ? statsFault : fault)
