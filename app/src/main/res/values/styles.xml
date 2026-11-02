@@ -1,0 +1,17 @@
+<resources>
+    <style name="PromptTheme" parent="AppTheme">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item><item name="android:colorAccent">#4B6094</item>
+        <item name="android:windowLightStatusBar">true</item><item name="android:statusBarColor">#FAF8FF</item>
+        <item name="android:navigationBarColor">#FAF8FF</item><item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <style name="AppThemeDark" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item><item name="android:colorAccent">#B9C7FF</item>
+        <item name="android:windowLightStatusBar">false</item><item name="android:statusBarColor">#15151E</item>
+        <item name="android:navigationBarColor">#15151E</item><item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

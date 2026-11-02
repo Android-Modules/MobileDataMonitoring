@@ -1,0 +1,303 @@
+<div id="mobile-data-guard" class="viz-dotted-background" aria-label="流量守卫手机交互设计">
+  <div class="mg-phone" aria-label="流量守卫">
+    <div class="mg-preview">交互设计预览 <span>示例数据 · 未接入统计</span></div>
+    <header class="mg-header"></header>
+    <div class="mg-sims" aria-label="查看卡槽"></div>
+    <main class="mg-main"></main>
+    <nav class="mg-nav" aria-label="主导航"></nav>
+    <div class="mg-home-line" aria-hidden="true"></div>
+    <div class="mg-message" role="status" aria-live="polite" hidden></div>
+  </div>
+</div>
+<style>
+  #mobile-data-guard { --mg-bg:light-dark(#f4f6f7,#141a1c); --mg-surface:light-dark(#fff,#20282b); --mg-text:light-dark(#172d32,#e4eff0); --mg-secondary:light-dark(#63777d,#a8babf); --mg-line:light-dark(#e6edef,#354348); --mg-accent:light-dark(#087f74,#76dac7); --mg-soft:light-dark(#e4f4ef,#193b35); --mg-amber:light-dark(#98601a,#f3c27f); --mg-amber-soft:light-dark(#fff2dd,#403322); --mg-red:light-dark(#bb4846,#f3a19b); --mg-red-soft:light-dark(#ffefed,#402a2a); --mg-radius:22px; color:var(--mg-text); padding:18px 8px; font:14px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC",sans-serif; }
+  #mobile-data-guard * { box-sizing:border-box; }
+  #mobile-data-guard [hidden] { display:none !important; }
+  #mobile-data-guard .mg-phone { max-width:430px; margin:auto; background:var(--mg-bg); border:1px solid var(--mg-line); border-radius:32px; overflow:hidden; position:relative; box-shadow:0 12px 40px light-dark(#142f3412,#0004); }
+  #mobile-data-guard h1,#mobile-data-guard h2,#mobile-data-guard h3,#mobile-data-guard p { margin:0; }
+  #mobile-data-guard button,#mobile-data-guard input,#mobile-data-guard select { font:inherit; color:inherit; }
+  #mobile-data-guard button { background:none; border:0; padding:0; text-align:left; }
+  #mobile-data-guard button:disabled { opacity:.5; }
+  #mobile-data-guard .mg-preview { display:flex; justify-content:space-between; flex-wrap:wrap; gap:3px; padding:12px 22px 0; font-size:11px; color:var(--mg-secondary); letter-spacing:.2px; }
+  #mobile-data-guard .mg-header { padding:22px 22px 17px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  #mobile-data-guard .mg-header h1 { font-size:26px; font-weight:650; letter-spacing:-.7px; line-height:1.3; }
+  #mobile-data-guard .mg-subtitle { color:var(--mg-secondary); font-size:12px; margin-top:4px; }
+  #mobile-data-guard .mg-icon { width:20px; height:20px; flex-shrink:0; display:inline-block; }
+  #mobile-data-guard .mg-icon-button { display:flex; justify-content:center; align-items:center; width:44px; height:44px; border-radius:15px; background:var(--mg-surface); }
+  #mobile-data-guard .mg-header-title { display:flex; align-items:center; gap:10px; }
+  #mobile-data-guard .mg-header-title h1 { font-size:23px; }
+  #mobile-data-guard .mg-sims { padding:0 22px 18px; display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  #mobile-data-guard .mg-sim { padding:12px 13px; background:var(--mg-surface); border:1px solid transparent; border-radius:17px; min-width:0; }
+  #mobile-data-guard .mg-sim[aria-pressed="true"] { background:var(--mg-soft); border-color:var(--mg-accent); }
+  #mobile-data-guard .mg-sim-top { display:flex; gap:5px; align-items:center; font-weight:600; white-space:nowrap; }
+  #mobile-data-guard .mg-sim-top .mg-icon { width:16px; height:16px; }
+  #mobile-data-guard .mg-sim-detail { font-size:11px; color:var(--mg-secondary); margin-top:5px; }
+  #mobile-data-guard .mg-dot { display:inline-block; width:6px; height:6px; background:var(--mg-accent); border-radius:50%; margin-right:5px; }
+  #mobile-data-guard .mg-main { padding:0 22px 22px; min-height:520px; }
+  #mobile-data-guard .mg-panel { background:var(--mg-surface); border-radius:var(--mg-radius); padding:18px; margin-bottom:14px; }
+  #mobile-data-guard .mg-hero { background:var(--mg-soft); padding:22px; }
+  #mobile-data-guard .mg-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  #mobile-data-guard .mg-wrap { flex-wrap:wrap; }
+  #mobile-data-guard .mg-label { color:var(--mg-secondary); font-size:12px; }
+  #mobile-data-guard .mg-big { font-size:49px; line-height:1.15; font-weight:600; letter-spacing:-2.4px; margin:14px 0 5px; font-variant-numeric:tabular-nums; }
+  #mobile-data-guard .mg-big small { font-size:19px; font-weight:500; letter-spacing:0; margin-left:5px; }
+  #mobile-data-guard .mg-meter { height:6px; border-radius:8px; overflow:hidden; background:light-dark(#172d320d,#e4eff014); margin:17px 0 8px; }
+  #mobile-data-guard .mg-meter span { display:block; height:100%; background:var(--mg-accent); border-radius:8px; }
+  #mobile-data-guard .mg-meter.is-empty span { background:var(--mg-red); }
+  #mobile-data-guard .mg-badge { display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:7px; background:var(--mg-soft); color:var(--mg-accent); font-size:11px; font-weight:500; white-space:nowrap; }
+  #mobile-data-guard .mg-badge.warn { background:var(--mg-amber-soft); color:var(--mg-amber); }
+  #mobile-data-guard .mg-badge.danger { background:var(--mg-red-soft); color:var(--mg-red); }
+  #mobile-data-guard .mg-badge.neutral { background:var(--mg-bg); color:var(--mg-secondary); }
+  #mobile-data-guard .mg-small { font-size:12px; color:var(--mg-secondary); }
+  #mobile-data-guard .mg-note { font-size:12px; color:var(--mg-secondary); margin-top:12px; line-height:1.7; }
+  #mobile-data-guard .mg-inline-note { display:flex; align-items:flex-start; gap:8px; padding:12px 13px; border-radius:13px; background:var(--mg-amber-soft); color:var(--mg-amber); font-size:12px; margin-bottom:14px; }
+  #mobile-data-guard .mg-inline-note .mg-icon { width:17px; height:17px; margin-top:2px; }
+  #mobile-data-guard .mg-summary { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:4px 4px 19px; }
+  #mobile-data-guard .mg-summary strong { display:block; font-size:20px; font-weight:600; margin-top:3px; }
+  #mobile-data-guard .mg-link { color:var(--mg-accent); font-size:12px; padding:8px 0; min-height:40px; }
+  #mobile-data-guard .mg-section { margin:22px 0 11px; }
+  #mobile-data-guard .mg-section h2 { font-size:16px; font-weight:600; }
+  #mobile-data-guard .mg-item { display:flex; align-items:center; gap:12px; padding:15px 0; border-bottom:1px solid var(--mg-line); width:100%; }
+  #mobile-data-guard .mg-item:last-child { border-bottom:0; padding-bottom:0; }
+  #mobile-data-guard .mg-item:first-child { padding-top:0; }
+  #mobile-data-guard .mg-item-text { min-width:0; flex:1; }
+  #mobile-data-guard .mg-item-name { font-weight:550; font-size:14px; }
+  #mobile-data-guard .mg-item-text .mg-small { margin-top:3px; }
+  #mobile-data-guard .mg-app-icon { display:flex; align-items:center; justify-content:center; background:var(--mg-soft); color:var(--mg-accent); border-radius:13px; width:40px; height:40px; flex-shrink:0; font-weight:600; font-size:16px; }
+  #mobile-data-guard .mg-app-icon.neutral { color:var(--mg-secondary); background:var(--mg-bg); }
+  #mobile-data-guard .mg-value { text-align:right; font-variant-numeric:tabular-nums; font-size:14px; white-space:nowrap; }
+  #mobile-data-guard .mg-value small { display:block; font-size:11px; color:var(--mg-secondary); margin-top:3px; }
+  #mobile-data-guard .mg-chev { color:var(--mg-secondary); width:16px; height:16px; flex-shrink:0; }
+  #mobile-data-guard .mg-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; padding:10px 16px; border:1px solid var(--mg-line); border-radius:13px; background:var(--mg-surface); font-weight:550; font-size:13px; }
+  #mobile-data-guard .mg-button.primary { color:var(--mg-surface); background:var(--mg-accent); border-color:var(--mg-accent); }
+  #mobile-data-guard .mg-button.wide { width:100%; }
+  #mobile-data-guard .mg-button.soft { background:var(--mg-soft); border-color:transparent; color:var(--mg-accent); }
+  #mobile-data-guard .mg-actions { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
+  #mobile-data-guard .mg-actions > * { flex:1; }
+  #mobile-data-guard .mg-pack { padding:18px; background:var(--mg-surface); border-radius:var(--mg-radius); margin-bottom:12px; }
+  #mobile-data-guard .mg-pack-title { display:block; width:100%; }
+  #mobile-data-guard .mg-pack h3 { font-size:15px; font-weight:600; }
+  #mobile-data-guard .mg-pack-total { font-size:23px; font-weight:600; margin-top:15px; font-variant-numeric:tabular-nums; }
+  #mobile-data-guard .mg-pack-total small { font-size:12px; color:var(--mg-secondary); font-weight:400; }
+  #mobile-data-guard .mg-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:13px; }
+  #mobile-data-guard .mg-chip { border-radius:7px; background:var(--mg-bg); font-size:11px; color:var(--mg-secondary); padding:4px 7px; overflow-wrap:anywhere; }
+  #mobile-data-guard .mg-nav { border-top:1px solid var(--mg-line); display:grid; grid-template-columns:repeat(4,1fr); background:var(--mg-surface); padding:8px 12px 4px; }
+  #mobile-data-guard .mg-nav button { display:flex; flex-direction:column; gap:4px; align-items:center; padding:8px 3px; font-size:11px; color:var(--mg-secondary); border-radius:15px; }
+  #mobile-data-guard .mg-nav button[aria-current="page"] { color:var(--mg-accent); background:var(--mg-soft); }
+  #mobile-data-guard .mg-home-line { width:96px; height:4px; background:var(--mg-text); opacity:.18; border-radius:9px; margin:9px auto; }
+  #mobile-data-guard .mg-field { display:block; margin-bottom:16px; font-size:12px; color:var(--mg-secondary); }
+  #mobile-data-guard .mg-field:last-child { margin-bottom:0; }
+  #mobile-data-guard .mg-field input,#mobile-data-guard .mg-field select { display:block; width:100%; min-height:44px; border:1px solid var(--mg-line); border-radius:12px; background:var(--mg-bg); color:var(--mg-text); padding:10px 12px; margin-top:7px; font-size:14px; }
+  #mobile-data-guard .mg-fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  #mobile-data-guard .mg-choice { display:flex; align-items:center; gap:11px; min-height:50px; padding:9px 0; border-bottom:1px solid var(--mg-line); }
+  #mobile-data-guard .mg-choice:last-child { border-bottom:0; }
+  #mobile-data-guard .mg-choice input { width:18px; height:18px; accent-color:var(--mg-accent); flex-shrink:0; }
+  #mobile-data-guard .mg-choice span { flex:1; }
+  #mobile-data-guard .mg-choice small { display:block; font-size:11px; color:var(--mg-secondary); margin-top:2px; overflow-wrap:anywhere; }
+  #mobile-data-guard .mg-choice input[role="switch"] { appearance:none; width:38px; height:22px; border-radius:20px; background:var(--mg-secondary); padding:3px; margin:0; }
+  #mobile-data-guard .mg-choice input[role="switch"]:checked { background:var(--mg-accent); }
+  #mobile-data-guard .mg-choice input[role="switch"]:before { content:""; display:block; width:16px; height:16px; border-radius:50%; background:var(--mg-surface); }
+  #mobile-data-guard .mg-choice input[role="switch"]:checked:before { transform:translateX(16px); }
+  #mobile-data-guard .mg-flow { display:flex; gap:12px; padding:12px 0; }
+  #mobile-data-guard .mg-flow-mark { width:25px; height:25px; flex-shrink:0; border-radius:50%; background:var(--mg-soft); color:var(--mg-accent); text-align:center; font-size:12px; line-height:25px; }
+  #mobile-data-guard .mg-flow-text { flex:1; min-width:0; }
+  #mobile-data-guard .mg-flow-text strong { font-size:13px; font-weight:550; }
+  #mobile-data-guard .mg-flow-text p { font-size:12px; color:var(--mg-secondary); margin-top:3px; }
+  #mobile-data-guard .mg-divider { height:1px; background:var(--mg-line); margin:15px 0; }
+  #mobile-data-guard .mg-error { color:var(--mg-red); font-size:12px; margin:10px 0; }
+  #mobile-data-guard .mg-empty { text-align:center; padding:32px 10px 22px; }
+  #mobile-data-guard .mg-empty .mg-icon { width:32px; height:32px; color:var(--mg-secondary); margin-bottom:12px; }
+  #mobile-data-guard .mg-message { position:absolute; z-index:5; bottom:90px; left:18px; right:18px; border:1px solid var(--mg-line); border-radius:15px; background:var(--mg-text); color:var(--mg-bg); padding:13px 16px; font-size:13px; box-shadow:0 4px 20px #0002; }
+  #mobile-data-guard .mg-rule-domain { display:block; color:var(--mg-secondary); font-size:12px; overflow-wrap:anywhere; margin-top:5px; }
+  #mobile-data-guard .mg-rule-result { margin:15px 0 0; padding:13px; border-radius:13px; background:var(--mg-soft); font-size:12px; }
+  @media(max-width:380px) { #mobile-data-guard {padding:8px 0;} #mobile-data-guard .mg-phone{border-radius:22px;} #mobile-data-guard .mg-main{padding:0 15px 18px;} #mobile-data-guard .mg-sims{padding:0 15px 15px;} #mobile-data-guard .mg-header{padding:18px 15px;} #mobile-data-guard .mg-preview{padding:12px 15px 0;} #mobile-data-guard .mg-hero{padding:18px;} #mobile-data-guard .mg-sim{padding:10px;} #mobile-data-guard .mg-big{font-size:44px;} #mobile-data-guard .mg-fields{grid-template-columns:1fr;} #mobile-data-guard .mg-actions{flex-direction:column;} #mobile-data-guard .mg-field input,#mobile-data-guard .mg-field select{font-size:16px;} }
+</style>
+<script>
+(() => {
+  const root = document.getElementById('mobile-data-guard');
+  const $ = s => root.querySelector(s);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const icon = (name, cls='mg-icon') => `<i data-lucide="${name}" class="${cls}" aria-hidden="true"></i>`;
+  const btn = (text, action, style='') => `<button type="button" class="mg-button cursor-interaction ${style}" data-action="${action}">${text}</button>`;
+  const link = (text, action) => `<button type="button" class="mg-link cursor-interaction" data-action="${action}">${text}</button>`;
+  const badge = (text, style='') => `<span class="mg-badge ${style}">${text}</span>`;
+  const note = text => `<div class="mg-inline-note">${icon('info')}<span>${text}</span></div>`;
+  const meter = (used, total, label) => `<div class="mg-meter ${used>=total?'is-empty':''}" role="meter" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${Math.min(used,total)}"><span style="width:${Math.min(100,used/total*100)}%"></span></div>`;
+  const apps = ['移动云盘','咪咕快游','咪咕阅读','移动云手机','移动云电脑','跑满了吗'];
+  const ruleSeeds = [
+    {id:'cloud',name:'云手机',host:'cloud.139.com',path:'/cloudimage/app/58800/',source:'湖北配置 · 下载资源'},
+    {id:'read',name:'咪咕悦读',host:'cdn3.cmread.com',path:'/operation/terminal/',source:'湖北配置 · 下载资源'},
+    {id:'game',name:'咪咕快游',host:'gcache.migu.cn',path:'/prod/upload/game_resource/',source:'湖北配置 · 下载资源'},
+    {id:'music',name:'咪咕音乐',host:'freetyst.nf.migu.cn',path:'/public/',source:'湖北配置 · 下载资源'},
+    {id:'school',name:'中移网大定向',host:'wangda.chinamobile.com',path:'/default/',source:'湖北配置 · 下载资源'}
+  ];
+  const cardDefaults = sim => ({alias:'卡 '+sim,cycle:1,unit:'decimal',adapter:'待选择',interval:'6',correction:null,manualCorrection:null});
+  const defaults = () => ({view:'overview',sim:2,filter:'all',rulesImported:false,editorId:null,ruleId:'game',cards:{1:cardDefaults(1),2:cardDefaults(2)},policy:'fixed',reserve:500,testLimit:1000,testProgress:0,testState:'idle',testProfile:'game',packages:[
+    {id:'general',sim:2,name:'国内通用流量',kind:'general',total:30,used:23.20,apps:[],rules:[],mode:'any',priority:100,period:'monthly'},
+    {id:'drive',sim:2,name:'移动云盘定向',kind:'directed',total:null,used:0,apps:['移动云盘'],rules:[],mode:'any',priority:10,period:'monthly'},
+    {id:'gamepack',sim:2,name:'咪咕快游 50 GB',kind:'directed',total:50,used:50,apps:['咪咕快游'],rules:['game'],mode:'any',priority:20,period:'monthly'},
+    {id:'desktop',sim:2,name:'移动云电脑 30 GB',kind:'directed',total:30,used:0,apps:['移动云电脑'],rules:[],mode:'any',priority:30,period:'monthly'},
+    {id:'family',sim:2,name:'全家享定向 70 GB',kind:'directed',total:70,used:0,apps:[],rules:[],mode:'any',priority:40,period:'monthly'}
+  ]});
+  let state=defaults();
+  let draft=null, messageTimer, intervalId;
+  const sessionId=Date.now().toString(36)+Math.random().toString(36).slice(2);
+  const validViews=['overview','packages','correction','protection','edit','rules','rule','apps','import','capture','manual','test','card','diagnostics'];
+  function restore(saved) {
+    const next=saved?.privateContent?.mobileDataGuard;
+    if (!next || next.schema!==1) return;
+    state={...defaults(),...next.state};
+    state.cards={1:{...cardDefaults(1),...next.state.cards?.[1]},2:{...cardDefaults(2),...next.state.cards?.[2]}};
+    if(!validViews.includes(state.view)||state.view==='edit') state.view='overview';
+    if(![1,2].includes(state.sim)) state.sim=2;
+    state.testState='idle';
+  }
+  restore(window.openai?.widgetState);
+  function persist() {
+    const snapshot={...state,testState:'idle'};
+    window.openai?.setWidgetState?.({modelContent:{prototype:'流量守卫',selectedSim:state.sim,view:state.view,protection:state.policy,card1DataAllowed:false,testLimitMB:state.testLimit},privateContent:{mobileDataGuard:{schema:1,source:sessionId,state:snapshot}}})?.catch(()=>{});
+  }
+  window.addEventListener('openai:set_globals', e=>{const saved=e.detail?.globals?.widgetState;if(saved?.privateContent?.mobileDataGuard?.source===sessionId)return;if(saved){clearInterval(intervalId);restore(saved);draft=null;render();}});
+  function toast(text) { const el=$('.mg-message');el.textContent=text;el.hidden=false;clearTimeout(messageTimer);messageTimer=setTimeout(()=>{el.hidden=true;},3200); }
+  function go(view) { if(state.testState==='running') {clearInterval(intervalId);state.testState='paused';} state.view=view;draft=null;render();persist(); }
+  const packs = () => state.packages.filter(p=>p.sim===state.sim);
+  const settings = () => state.cards[state.sim];
+  const effectiveUsed = p => p.used+(settings().correction?.pack===p.id?settings().correction.delta:0);
+  function generalSummary() { const list=packs().filter(p=>p.kind==='general');return {total:list.length&&list.every(p=>p.total!==null)?list.reduce((n,p)=>n+p.total,0):null,used:list.reduce((n,p)=>n+effectiveUsed(p),0)}; }
+  function header() {
+    const titles={overview:['流量守卫','双卡流量，一眼有数'],packages:['流量包','每张卡，独立管理额度'],correction:['官方校准','让本地统计跟上官方账单'],protection:['用量保护','额度有边界，用卡有规则'],edit:[state.editorId?'编辑流量包':'新建流量包','卡 '+state.sim+' · 独立配置'],rules:['识别规则','候选规则不等于定向扣费证明'],rule:['规则详情','按官方扣费结果验证适用范围'],apps:['应用用量','只统计当前卡的蜂窝数据'],import:['导入规则','两份配置，合并一次'],capture:['连接官方查询','在手机本地保存登录凭据'],manual:['手动校准','以官方同一账期用量为准'],test:['定向规则验证','离线演示 · 不发起下载'],card:['卡片与账期','槽位用于显示，卡身份用于记账'],diagnostics:['模块状态','功能接入后再显示实际状态']};
+    const [title,sub]=titles[state.view];
+    const back=!['overview','packages','correction','protection'].includes(state.view);
+    $('.mg-header').innerHTML=`<div class="${back?'mg-header-title':''}">${back?`<button type="button" aria-label="返回" class="mg-icon-button cursor-interaction" data-action="back">${icon('arrow-left')}</button>`:''}<div><h1>${esc(title)}</h1><p class="mg-subtitle">${esc(sub)}</p></div></div>${!back?`<button type="button" class="mg-icon-button cursor-interaction" aria-label="卡片与账期设置" data-action="card">${icon('sliders-horizontal')}</button>`:''}`;
+    const simViews=['overview','packages','correction','protection','apps'];
+    $('.mg-sims').hidden=!simViews.includes(state.view);
+    $('.mg-sims').innerHTML=[1,2].map(n=>`<button type="button" class="mg-sim cursor-interaction" data-sim="${n}" aria-pressed="${state.sim===n}"><span class="mg-sim-top">${icon('contact-round')}卡 ${n} ${n===2?badge('数据卡'):''}</span><p class="mg-sim-detail">${esc(state.cards[n].alias!=='卡 '+n?state.cards[n].alias:n===2?'运营商待确认 · 可配置':'无可用流量 · 禁止数据')}</p></button>`).join('');
+    const active=({edit:'packages',rules:'packages',rule:'packages',import:'packages',capture:'correction',manual:'correction',test:'protection',apps:'overview',card:'overview',diagnostics:'overview'})[state.view]||state.view;
+    $('.mg-nav').innerHTML=[['overview','总览','layout-dashboard'],['packages','流量包','layers'],['correction','校准','refresh-cw'],['protection','保护','shield-check']].map(([v,t,i])=>`<button type="button" class="cursor-interaction" ${v===active?'aria-current="page"':''} data-action="${v}">${icon(i)}<span>${t}</span></button>`).join('');
+  }
+  function card1Empty() { return `<div class="mg-panel mg-empty">${icon('shield-off')}<h2>卡 1 暂不使用流量</h2><p class="mg-note">禁止作为测试卡和自动切卡目标。<br>套餐仍可独立配置，供以后启用。</p><div class="mg-actions">${btn('配置卡 1 流量包','new','soft')}</div></div>`; }
+  function overview() {
+    if(state.sim===1) return card1Empty()+`<div class="mg-panel"><div class="mg-row"><span>已配置流量包</span><strong>${packs().length} 个</strong></div>${link('查看卡 1 套餐 →','packages')}</div>`;
+    const {used,total}=generalSummary();
+    return `<section class="mg-panel mg-hero" aria-label="国内通用流量剩余"><div class="mg-row"><span>国内通用剩余</span>${badge('本周期')}</div><div class="mg-big">${total===null?'待设置':Math.max(0,total-used).toFixed(2)}${total!==null?'<small>GB</small>':''}</div><p class="mg-small">保守估算 · 预留 ${state.reserve} MB 后保护</p>${total===null?'':meter(used,total,'通用流量已用 GB')}<div class="mg-row mg-small"><span>已用 ${used.toFixed(2)} GB</span><span>${total===null?'额度未配置':'共 '+total+' GB'}</span></div><p class="mg-note">未验证的定向用量仍纳入通用保护预算</p></section>
+    <div class="mg-summary"><div><span class="mg-label">今日蜂窝用量</span><strong>826 <span class="mg-label">MB</span></strong></div><div><span class="mg-label">官方校准</span><div>${link(settings().correction?'已校准 · 示例 →':'待连接 →','correction')}</div></div></div>
+    <button type="button" class="mg-panel mg-item cursor-interaction" data-action="protection" style="width:100%;margin:0">${icon('shield-check')}<div class="mg-item-text"><div class="mg-item-name">${({stop:'额度不足，停止数据',switch:'有余量才切卡',fixed:'固定卡 2，阻止自动切卡'})[state.policy]}</div><div class="mg-small">卡 1 不可用 · 测试限制 ${state.testLimit} MB</div></div>${icon('chevron-right','mg-chev')}</button>
+    <div class="mg-section mg-row"><h2>定向流量包</h2>${link('全部流量包 →','packages')}</div><div class="mg-panel">${packs().filter(p=>p.kind==='directed').slice(0,2).map(p=>`<button type="button" class="mg-item cursor-interaction" data-edit="${p.id}"><div class="mg-app-icon">${p.id==='drive'?icon('cloud'):icon('gamepad-2')}</div><div class="mg-item-text"><div class="mg-item-name">${esc(p.name)}</div><div class="mg-small">${p.total===null?'额度待核实':p.used>=p.total?'已用尽，后续计入通用':'本地分类估算'}</div></div>${badge(p.total===null?'待配置':p.used>=p.total?'已用尽':'待验证',p.used>=p.total?'danger':'warn')}${icon('chevron-right','mg-chev')}</button>`).join('')}</div>
+    <div class="mg-section mg-row"><h2>应用用量</h2>${link('查看明细 →','apps')}</div><div class="mg-panel"><div class="mg-item"><div class="mg-app-icon neutral">跑</div><div class="mg-item-text"><div class="mg-item-name">跑满了吗</div><div class="mg-small">含候选定向命中，待官方核实</div></div><div class="mg-value">312 MB<small>今日 · 卡 2</small></div></div></div>${link('模块未连接 · 查看接入状态 →','diagnostics')}`;
+  }
+  function packages() {
+    const list=packs().filter(p=>state.filter==='all'||p.kind===state.filter).map(p=>({...p,used:effectiveUsed(p)}));
+    return `<div class="mg-row mg-wrap" style="margin-bottom:14px">${btn('＋ 新建流量包','new','soft')}${link('识别规则库 →','rules')}</div><label class="mg-field">流量类型<select data-setting="filter" aria-label="筛选流量类型"><option value="all" ${state.filter==='all'?'selected':''}>全部流量包</option><option value="general" ${state.filter==='general'?'selected':''}>国内通用流量</option><option value="directed" ${state.filter==='directed'?'selected':''}>定向流量</option></select></label>${state.sim===1?note('卡 1 不参与测试，也不会被自动启用移动数据。'):''}${list.length?list.map(p=>`<section class="mg-pack"><button type="button" class="mg-pack-title cursor-interaction" data-edit="${esc(p.id)}"><div class="mg-row"><h3>${esc(p.name)}</h3>${icon('chevron-right','mg-chev')}</div></button><div class="mg-row"><div class="mg-pack-total">${p.total===null?'待核实':Math.max(0,p.total-p.used).toFixed(2)+' GB'} <small>${p.total===null?'套餐额度':'剩余'}</small></div>${badge(p.kind==='general'?'通用':p.total!==null&&p.used>=p.total?'已用尽':'待验证',p.kind==='general'?'neutral':p.total!==null&&p.used>=p.total?'danger':'warn')}</div>${p.total!==null?meter(p.used,p.total,p.name+'已用 GB'):''}<div class="mg-row mg-small"><span>已用 ${p.used.toFixed(2)} GB · 示例</span><span>${p.total===null?'不视为无限量':'总量 '+p.total+' GB'}</span></div>${p.kind==='directed'?`<div class="mg-chips">${p.apps.map(a=>`<span class="mg-chip">${esc(a)}</span>`).join('')}${p.rules.length?`<span class="mg-chip">${p.rules.length} 条规则</span>`:''}${!p.apps.length&&!p.rules.length?'<span class="mg-chip">未绑定应用或规则</span>':''}</div>`:''}</section>`).join(''):`<div class="mg-panel mg-empty"><h2>还没有流量包</h2><p class="mg-note">为这张卡设置通用额度或定向流量包</p></div>`}`;
+  }
+  function edit() {
+    if(!draft) draft={scope:'single',poolKey:'',accountAlias:'',members:1,...JSON.parse(JSON.stringify(state.packages.find(p=>p.id===state.editorId)||{id:null,sim:state.sim,name:'',kind:'directed',total:null,used:0,apps:[],rules:[],mode:'any',priority:50,period:'monthly'}))};
+    return `<form id="mg-pack-form"><div class="mg-panel"><label class="mg-field">流量包名称<input name="name" required maxlength="40" value="${esc(draft.name)}" placeholder="例如：移动云盘定向"></label><div class="mg-fields"><label class="mg-field">流量类型<select name="kind"><option value="general" ${draft.kind==='general'?'selected':''}>国内通用</option><option value="directed" ${draft.kind==='directed'?'selected':''}>定向流量</option></select></label><label class="mg-field">总额度 / GB<input name="total" type="number" min="0.001" step="0.001" value="${draft.total??''}" placeholder="未知可留空"></label></div><div class="mg-fields"><label class="mg-field">当前已用 / GB<input name="used" type="number" min="0" step="0.001" required value="${draft.used}"></label><label class="mg-field">重置周期<select name="period"><option value="monthly" ${draft.period==='monthly'?'selected':''}>按卡片账期</option><option value="fixed" ${draft.period==='fixed'?'selected':''}>不自动重置</option></select></label></div></div>
+    <div class="mg-panel"><label class="mg-field">额度归属<select name="scope"><option value="single" ${draft.scope==='single'?'selected':''}>本卡独享</option><option value="shared" ${draft.scope==='shared'?'selected':''}>账户共享额度池</option></select></label><label class="mg-field">所属账号备注<input name="accountAlias" maxlength="30" value="${esc(draft.accountAlias)}" placeholder="例如：联通主账号 A"></label><div class="mg-fields"><label class="mg-field">共享池标识<input name="poolKey" maxlength="40" value="${esc(draft.poolKey)}" placeholder="共享时必填"></label><label class="mg-field">账户成员数量<input name="members" type="number" min="1" max="99" value="${draft.members}"></label></div><p class="mg-note">共享池在账号下只保留一份额度。账号成员不等于手机卡槽；校准时分别保留共享总用量和本卡用量。</p></div>
+    <div class="mg-section"><h2>绑定应用 · 可多选</h2><p class="mg-note">应用归类用于估算；第三方内容可能仍扣通用流量。</p></div><div class="mg-panel">${apps.map(a=>`<label class="mg-choice"><input type="checkbox" name="apps" value="${a}" ${draft.apps.includes(a)?'checked':''}><span>${a}</span></label>`).join('')}</div>
+    <div class="mg-section mg-row"><h2>绑定识别规则 · 可多选</h2></div><div class="mg-panel">${ruleSeeds.map(r=>`<label class="mg-choice"><input type="checkbox" name="rules" value="${r.id}" ${draft.rules.includes(r.id)?'checked':''}><span>${r.name}<small>${r.host} · 待验证</small></span></label>`).join('')}</div>
+    <div class="mg-panel"><label class="mg-field">匹配方式<select name="mode"><option value="any" ${draft.mode==='any'?'selected':''}>任一应用或任一规则命中</option><option value="both" ${draft.mode==='both'?'selected':''}>应用命中，且任一规则命中</option></select></label><label class="mg-field">归属优先级 · 数字越小越优先<input name="priority" type="number" required min="1" max="1000" value="${draft.priority}"></label><p class="mg-note">同一笔流量只归属一个包。耗尽或额度未核实的包，不抵扣通用保护预算。</p></div><p class="mg-error" id="mg-form-error" role="alert" hidden></p><button class="mg-button primary wide cursor-interaction" type="submit">保存流量包</button></form>`;
+  }
+  function rules() { return `${note('当前 5 组仅为候选规则。湖北配置在江苏套餐上的扣费归属尚未验证。')}<div class="mg-row mg-wrap" style="margin-bottom:16px">${btn(state.rulesImported?'查看导入结果':'分析两份 .conf','import','soft')}${link('去验证规则 →','test')}</div><div class="mg-panel">${ruleSeeds.map(r=>`<button type="button" class="mg-item cursor-interaction" data-rule="${r.id}"><div class="mg-item-text"><div class="mg-item-name">${r.name}</div><span class="mg-rule-domain">${r.host}</span><div class="mg-small">${r.source}</div></div>${badge('待验证','warn')}${icon('chevron-right','mg-chev')}</button>`).join('')}</div><p class="mg-note">只识别实际可见的字段。无法读取 HTTPS 路径时，保持待识别，不扩大为整个域名。</p>`; }
+  function rule() {
+    const r=ruleSeeds.find(r=>r.id===state.ruleId)||ruleSeeds[0];
+    return `<div class="mg-panel"><div class="mg-row"><h2 style="font-size:18px">${r.name}</h2>${badge('待验证','warn')}</div><div class="mg-divider"></div><p class="mg-label">域名 · 精确匹配</p><span class="mg-rule-domain">${r.host}</span><p class="mg-label" style="margin-top:16px">路径范围 · 从样例提取</p><span class="mg-rule-domain">${r.path}</span><p class="mg-note">仅路径前缀不足以证明免流；原始配置使用具体下载 URL，路径扩展仍需逐条验证。</p></div><div class="mg-panel"><div class="mg-row"><span>适用运营商 / 地区</span><span class="mg-small">待官方验证</span></div><div class="mg-divider"></div><div class="mg-row"><span>证据来源</span><span class="mg-small">湖北测速配置</span></div><p class="mg-note">未保留样例 URL 中的账号、密钥或时效参数。</p></div>${btn('模拟匹配 10 MB 样例','sample','soft wide')}<div id="mg-rule-result" class="mg-rule-result" hidden role="status"></div><div class="mg-actions">${btn('返回规则库','rules')}${btn('验证扣费归属','test','primary')}</div>`;
+  }
+  function imported() { return `<div class="mg-panel"><div class="mg-row"><h2 style="font-size:17px">配置分析结果</h2>${badge('内容一致','neutral')}</div><p class="mg-note">湖北移动定向配置20260801.conf<br>及带 20261031_203910 时间戳的副本</p><div class="mg-divider"></div><div class="mg-row"><span>输入文件</span><strong>2 份</strong></div><div class="mg-row" style="margin-top:10px"><span>合并后候选规则</span><strong>5 组</strong></div><div class="mg-row" style="margin-top:10px"><span>重复副本</span><strong>1 份 · 已忽略</strong></div></div>${note('这是 HBCS_SPEED_TEST_CONFIG v2 测速配置，包含下载资源，不包含运营商余量接口或套餐额度。')}<div class="mg-panel">${ruleSeeds.map(r=>`<div class="mg-row" style="padding:8px 0"><span>${r.name}</span>${badge('待验证','warn')}</div>`).join('')}</div>${btn(state.rulesImported?'查看规则库':'保存为候选规则','confirm-import','primary wide')}`; }
+  function correction() {
+    const cfg=settings(),adjustment=cfg.correction,manual=cfg.manualCorrection;
+    const calibratedPack=state.packages.find(p=>p.id===adjustment?.pack);
+    const manualPack=state.packages.find(p=>p.id===manual?.pack);
+    return `${state.sim===1?note('卡 1 可配置官方查询；测试仍不会使用这张卡。'):''}<div class="mg-panel"><div class="mg-row"><div><h2 style="font-size:17px">官方流量查询</h2><p class="mg-note" style="margin-top:5px">按卡分别绑定运营商账号</p></div>${badge('未接入','neutral')}</div><div class="mg-divider"></div><label class="mg-field">运营商适配器<select data-setting="adapter">${['待选择','中国移动 · 江苏','中国联通'].map(v=>`<option ${cfg.adapter===v?'selected':''}>${v}</option>`).join('')}</select></label>${btn('连接查询接口','capture','soft wide')}<p class="mg-note">接口将在手机抓包后适配，当前没有真实请求。</p></div>
+    ${cfg.adapter==='中国联通'?`<div class="mg-panel"><h3 style="font-size:15px">联通账户与共享套餐</h3><div class="mg-chips">${badge('通用流量','neutral')}${badge('专属流量','neutral')}${badge('共享 / 独享','neutral')}</div><p class="mg-note">绑定登录账号后，分别映射每个官方包。共享池总用量与本卡用量分开，汇总与子包不重复相加。</p><div class="mg-divider"></div><div class="mg-row"><span>账号与本卡关系</span>${badge('待确认','warn')}</div><p class="mg-note">在卡 2 网络上查询联通账号，不代表该账号属于卡 2。</p></div>`:''}
+    <div class="mg-panel"><h3 style="font-size:15px">自动校准计划</h3><div class="mg-divider"></div><label class="mg-field">查询频率<select data-setting="interval">${[['6','每 6 小时'],['12','每 12 小时'],['24','每天一次'],['0','仅手动查询']].map(([v,t])=>`<option value="${v}" ${cfg.interval===v?'selected':''}>${t}</option>`).join('')}</select></label><p class="mg-note">连接成功后启用。登录失效、验证码或接口限频时，提示处理并暂停自动查询。</p></div>
+    <div class="mg-section mg-row"><h2>校准记录</h2>${link('手动校准 →','manual')}</div>
+    ${adjustment?`<div class="mg-panel"><div class="mg-row"><span>${esc(calibratedPack?.name||'流量包')}</span>${badge('已校准 · 示例')}</div><p class="mg-note">校准前 ${adjustment.from.toFixed(2)} GB → 校准后 ${adjustment.to.toFixed(2)} GB</p><div class="mg-divider"></div><p class="mg-small">保留原始计数与校准差额；不重复累加。</p></div>`:''}
+    ${manual?`<div class="mg-panel"><div class="mg-row"><span>${esc(manualPack?.name||'流量包')}</span>${badge('快照已保存','neutral')}</div><p class="mg-note">官方已用 ${manual.used.toFixed(3)} GB<br>截至 ${esc(manual.asof.replace('T',' '))}</p><p class="mg-note">待本地时间对应计数接入，尚未改变保护基准。</p></div>`:''}
+    ${!adjustment&&!manual?'<div class="mg-panel mg-empty"><p>还没有校准记录</p><p class="mg-note">连接官方查询，或先填写官方已用量</p></div>':''}
+    ${packs().some(p=>p.kind==='general')?btn('预览官方差额校准','demo-correction','wide'):''}`;
+  }
+  function capture() { return `<div class="mg-panel"><div class="mg-row"><span>${esc(settings().adapter==='待选择'?'运营商待选择':settings().adapter)}</span>${badge('等待抓包适配','warn')}</div><div class="mg-divider"></div>${[['打开官方 App 的余量详情','使用手机上的 HttpCanary 记录这一次查询。'],['定位只读查询请求','识别套餐列表、已用量、剩余量和官方统计时间。'],['在手机本地导入并绑定卡片','登录凭据保存在本机；接口验证通过后才能启用定时校准。']].map(([t,d],i)=>`<div class="mg-flow"><span class="mg-flow-mark">${i+1}</span><div class="mg-flow-text"><strong>${t}</strong><p>${d}</p></div></div>`).join('')}</div>${note('本页为连接流程设计。登录态、签名、验证码和返回字段尚未验证，不会在原型中请求或保存真实凭据。')}<div class="mg-panel"><div class="mg-row"><span>套餐字段映射</span><span class="mg-small">待识别</span></div><div class="mg-divider"></div><div class="mg-row"><span>数据对应卡片</span><span>卡 ${state.sim}</span></div><div class="mg-divider"></div><div class="mg-row"><span>接口状态</span><span class="mg-small">未连接</span></div></div>${btn('返回校准设置','correction','wide')}`; }
+  function manual() { return `<form id="mg-manual-form"><div class="mg-panel"><label class="mg-field">流量包<select name="pack">${packs().map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label><label class="mg-field">官方已用量 / GB<input name="official" type="number" min="0" step="0.001" required placeholder="以运营商详情为准"></label><label class="mg-field">官方统计截至时间<input name="asof" type="datetime-local" required></label></div>${note('应用校准只调整这个流量包的基准。官方统计时间之后的本地用量仍需保留。')}<p class="mg-error" id="mg-manual-error" role="alert" hidden></p><button type="submit" class="mg-button primary wide cursor-interaction" ${packs().length?'':'disabled'}>保存校准 · 原型演示</button></form>`; }
+  function protection() { if(state.sim===1) return card1Empty(); return `<div class="mg-panel"><h3 style="font-size:16px">额度不足时</h3><label class="mg-choice"><input type="radio" name="policy" value="stop" ${state.policy==='stop'?'checked':''}><span>停止移动数据<small>达到保护线后停用当前卡数据</small></span></label><label class="mg-choice"><input type="radio" name="policy" value="switch" ${state.policy==='switch'?'checked':''}><span>自动切换有余量的卡<small>先确认目标卡额度、信号和允许用卡状态</small></span></label><label class="mg-choice"><input type="radio" name="policy" value="fixed" ${state.policy==='fixed'?'checked':''}><span>固定使用卡 2<small>阻止自动切卡；卡 2 达保护线后停止数据</small></span></label></div>
+    <div class="mg-panel"><label class="mg-field">通用流量安全预留 / MB<input type="number" min="100" max="2000" step="50" data-setting="reserve" value="${state.reserve}"></label><div class="mg-divider"></div><div class="mg-row"><span>卡 1 · 备用状态</span>${badge('禁止数据','danger')}</div><p class="mg-note">自动切卡无可用目标时，停止移动数据。切卡失败不循环重试；保留原因和通知。</p></div>
+    <div class="mg-panel"><div class="mg-row"><div><h3 style="font-size:15px">测试保护</h3><p class="mg-note" style="margin-top:5px">仅卡 2 · 首阶段预算 1 GB</p></div>${badge('固定卡 2')}</div><p class="mg-note">总授权上限 5 GB，主动停止线最高 4.5 GB。累计预算跨任务保留，卡变化或用量不可读时停止测试。</p><div class="mg-actions">${btn('打开验证流程','test','soft')}</div></div>${btn('预览保护触发结果','simulate-protection','wide')}<div id="mg-protection-result" class="mg-rule-result" role="status" hidden></div><p class="mg-note">当前尚未接入系统控制。实机运行时显示能力检测、执行结果与恢复入口。</p>`; }
+  function test() {
+    const running=state.testState==='running';
+    return `${note('仅演示流程，不产生真实流量。实机仅卡 2，首阶段 1 GB，总授权上限 5 GB。')}<div class="mg-panel"><div class="mg-row"><span>测试卡</span>${badge('仅卡 2')}</div><div class="mg-divider"></div><div class="mg-row"><span>卡 1 数据</span><span class="mg-small">始终禁止</span></div><div class="mg-divider"></div><label class="mg-field">测试资源<select data-setting="testProfile" ${running?'disabled':''}>${ruleSeeds.map(r=>`<option value="${r.id}" ${state.testProfile===r.id?'selected':''}>${r.name} · 待验证</option>`).join('')}</select></label><label class="mg-field">累计停止阈值 / MB<input type="number" min="10" max="4500" step="10" value="${state.testLimit}" data-setting="testLimit" ${running?'disabled':''}></label><p class="mg-note">停止线最高 4500 MB，预留至少 500 MB 缓冲；包括后台蜂窝流量。不是下载完成目标。</p></div>
+    <div class="mg-panel"><div class="mg-row"><span>累计测试预算消耗 · 演示</span>${badge(running?'模拟进行中':state.testState==='finished'?'已停止':state.testState==='paused'?'已暂停':'待开始','neutral')}</div><div class="mg-pack-total">${state.testProgress} <small>/ ${state.testLimit} MB</small></div>${meter(state.testProgress,state.testLimit,'模拟测试累计 MB')}<p class="mg-note">${state.testState==='finished'?'达到演示保护线，已自动停止。官方扣费归属仍待核实。':'真实测试前后分别查询官方通用与定向余额，等待账单入账后比较。'}</p></div><div class="mg-actions">${btn(running?'暂停模拟':'模拟运行流程',running?'pause-test':'start-test','primary')}${btn('停止模拟','stop-test')}</div><p class="mg-note">本次用量不会清零。实际测试会从小样本开始，不直接跑满预算。</p>`;
+  }
+  function appStats() { return `${note('应用统计是分类估算。匹配到多个包时按优先级归属，不重复计费。')}<div class="mg-panel">${(state.sim===2?[['跑满了吗','312 MB','候选规则命中 · 待验证'],['咪咕快游','286 MB','定向包已用尽 · 计入通用'],['移动云盘','128 MB','额度未知 · 计入保护预算'],['其他应用','100 MB','通用 / 未识别']]:[]).map(([a,v,d])=>`<div class="mg-item"><div class="mg-app-icon neutral">${a.slice(0,1)}</div><div class="mg-item-text"><div class="mg-item-name">${a}</div><div class="mg-small">${d}</div></div><div class="mg-value">${v}</div></div>`).join('')||'<p class="mg-small">卡 1 暂无用量记录</p>'}</div><p class="mg-note">统计范围：当前卡 · 今日 · 接收 + 发送。Wi-Fi 不计入。</p>`; }
+  function card() { const cfg=settings();return `<form id="mg-card-form"><div class="mg-panel"><h2 style="font-size:16px">卡 ${state.sim}</h2><label class="mg-field" style="margin-top:16px">卡片备注<input name="alias" maxlength="30" value="${esc(cfg.alias)}"></label><label class="mg-field">每月账期起始日<select name="cycle">${Array.from({length:31},(_,i)=>`<option value="${i+1}" ${cfg.cycle===i+1?'selected':''}>每月 ${i+1} 日</option>`).join('')}</select></label><label class="mg-field">运营商计量单位<select name="unit"><option value="decimal" ${cfg.unit!=='binary'?'selected':''}>1 GB = 1000 MB</option><option value="binary" ${cfg.unit==='binary'?'selected':''}>1 GB = 1024 MB</option></select></label><p class="mg-note">当月没有对应日期时，按当月最后一天计算。</p></div>${note('运营商和卡槽的对应关系尚待确认。正式模块换卡后会重新校验身份，避免把旧卡套餐套给新卡。')}<button type="submit" class="mg-button primary wide cursor-interaction">保存卡片设置</button></form>`; }
+  function diagnostics() { return `<div class="mg-panel">${[['LSPosed 模块','待开发接入'],['目标 API','libxposed 102'],['按卡读取用量','待实机验证'],['应用与连接规则识别','待实机验证'],['停用数据 / 切换数据卡','待实机验证'],['江苏移动 / 联通查询','等待抓包适配']].map(([n,v])=>`<div class="mg-row" style="padding:12px 0;border-bottom:1px solid var(--mg-line)"><span>${n}</span><span class="mg-small">${v}</span></div>`).join('')}</div><p class="mg-note">不能执行的控制项应明确显示不可用；只有收到执行回执，才显示“已停用”或“已切换”。</p>`; }
+  function render() {
+    header();
+    const views={overview,packages,edit,rules,rule,import:imported,correction,capture,manual,protection,test,apps:appStats,card,diagnostics};
+    $('.mg-main').innerHTML=views[state.view]();
+    if(state.view==='packages') root.querySelectorAll('.mg-pack').forEach(el=>{const p=state.packages.find(p=>p.id===el.querySelector('[data-edit]').dataset.edit);if(p.scope==='shared'){const line=document.createElement('p');line.className='mg-note';line.textContent='共享额度池 '+p.poolKey+' · '+p.members+' 位成员'+(p.accountAlias?' · '+p.accountAlias:'');el.append(line);}});
+    root.querySelectorAll('button').forEach(el=>el.classList.add('cursor-interaction'));
+    if(globalThis.lucide) globalThis.lucide.createIcons({attrs:{width:20,height:20}});
+  }
+  root.addEventListener('click',e=>{
+    const el=e.target.closest('button'); if(!el||!root.contains(el)) return;
+    if(el.type==='submit') {e.preventDefault();const form=el.closest('form');if(form?.reportValidity())saveForm(form);return;}
+    if(el.dataset.sim) {state.sim=Number(el.dataset.sim);if(state.testState==='running'){clearInterval(intervalId);state.testState='paused';}render();persist();return;}
+    if(el.dataset.edit) {state.editorId=el.dataset.edit;go('edit');return;}
+    if(el.dataset.rule) {state.ruleId=el.dataset.rule;go('rule');return;}
+    const a=el.dataset.action;
+    if(['overview','packages','correction','protection','rules','import','capture','manual','test','apps','card','diagnostics'].includes(a)) return go(a);
+    if(a==='new') {state.editorId=null;return go('edit');}
+    if(a==='back') return go(({rule:'rules',capture:'correction',manual:'correction',test:'protection',apps:'overview',card:'overview',diagnostics:'overview'})[state.view]||'packages');
+    if(a==='confirm-import') {state.rulesImported=true;go('rules');toast('已保留 5 组候选规则，重复副本已忽略');return;}
+    if(a==='sample') {const result=$('#mg-rule-result');result.hidden=false;result.textContent='样例命中这条候选规则：10 MB → 定向估算。验证前，这 10 MB 仍纳入通用保护预算。';return;}
+    if(a==='demo-correction') {if(settings().correction){toast('这个示例已校准，不会重复叠加差额');return;}const p=packs().find(p=>p.kind==='general');if(!p)return;settings().correction={pack:p.id,from:p.used,to:p.used+0.36,delta:0.36};render();persist();toast('示例校准：+0.36 GB，原始计数保持不变');return;}
+    if(a==='simulate-protection') {const result=$('#mg-protection-result');result.hidden=false;result.textContent=state.policy==='switch'?'预览结果：卡 1 禁止数据，无可用切换目标 → 停止卡 2 移动数据并通知。':state.policy==='fixed'?'预览结果：拒绝切换到卡 1；卡 2 达保护线后 → 停止移动数据并通知。':'预览结果：卡 2 达保护线后 → 停止移动数据并通知。';return;}
+    if(a==='start-test') {
+      if(state.testProgress>=state.testLimit){toast('累计额度已达保护线，不能继续模拟');return;}
+      state.sim=2;state.testState='running';clearInterval(intervalId);render();
+      intervalId=setInterval(()=>{state.testProgress=Math.min(state.testLimit,state.testProgress+Math.max(1,Math.round(state.testLimit/12)));if(state.testProgress>=state.testLimit){state.testState='finished';clearInterval(intervalId);persist();}render();},700);return;
+    }
+    if(a==='pause-test'||a==='stop-test') {clearInterval(intervalId);state.testState=a==='pause-test'?'paused':'finished';render();persist();}
+  });
+  root.addEventListener('change',e=>{
+    const el=e.target;
+    if(el.name==='policy') {state.policy=el.value;persist();return;}
+    const s=el.dataset.setting;if(!s) return;
+    if(['reserve','testLimit'].includes(s)) {const min=s==='reserve'?100:10,max=s==='reserve'?2000:4500;state[s]=Math.max(min,Math.min(max,Number(el.value)||min));el.value=state[s];if(s==='testLimit'&&state.testProgress>=state.testLimit)state.testState='finished';}
+    else if(['adapter','interval'].includes(s)) settings()[s]=el.value;
+    else state[s]=el.value;
+    if(s==='filter'||s==='testLimit'||s==='adapter') render();
+    persist();
+  });
+  function saveForm(form) {
+    const fd=new FormData(form);
+    if(form.id==='mg-pack-form') {
+      const kind=fd.get('kind'),selectedApps=fd.getAll('apps'),selectedRules=fd.getAll('rules'),mode=fd.get('mode');
+      const err=$('#mg-form-error');
+      if(kind==='directed'&&mode==='both'&&(!selectedApps.length||!selectedRules.length)){err.hidden=false;err.textContent='同时匹配模式至少需要选择 1 个应用和 1 条规则。';return;}
+      const scope=fd.get('scope'),poolKey=String(fd.get('poolKey')).trim();
+      if(scope==='shared'&&!poolKey){err.hidden=false;err.textContent='共享流量包需要填写共享池标识，以免重复记账。';return;}
+      if(scope==='shared'&&state.packages.some(p=>p.id!==draft.id&&p.scope==='shared'&&p.poolKey===poolKey)){err.hidden=false;err.textContent='这个共享池已经存在，请编辑原共享包，避免重复配置额度。';return;}
+      const total=fd.get('total')===''?null:Number(fd.get('total'));
+      if(total===null&&kind==='general'){err.hidden=false;err.textContent='通用流量需要明确额度，才能设置保护线。';return;}
+      const updated={...draft,id:draft.id||'custom-'+Date.now(),name:String(fd.get('name')).trim(),kind,total,used:Number(fd.get('used')),apps:kind==='general'?[]:selectedApps,rules:kind==='general'?[]:selectedRules,mode,period:fd.get('period'),priority:Number(fd.get('priority')),scope,poolKey:scope==='shared'?poolKey:'',accountAlias:String(fd.get('accountAlias')).trim(),members:Number(fd.get('members'))};
+      if(!updated.name){err.hidden=false;err.textContent='请填写流量包名称。';return;}
+      const index=state.packages.findIndex(p=>p.id===updated.id);if(index>=0)state.packages[index]=updated;else state.packages.push(updated);
+      go('packages');toast('流量包已保存 · 仅保存在设计预览中');
+    }
+    if(form.id==='mg-manual-form') {
+      const p=state.packages.find(p=>p.id===fd.get('pack'));if(!p)return;
+      const asof=String(fd.get('asof'));
+      if(new Date(asof)>new Date()) {const err=$('#mg-manual-error');err.hidden=false;err.textContent='官方统计截至时间不能晚于当前时间。';return;}
+      settings().manualCorrection={pack:p.id,used:Number(fd.get('official')),asof};
+      // The prototype has no local counter history; keep the current estimate intact.
+      go('correction');toast('已保存演示校准快照；接入真实计数后计算时间差额');
+    }
+    if(form.id==='mg-card-form') {const cfg=settings();cfg.alias=String(fd.get('alias')).trim()||'卡 '+state.sim;cfg.cycle=Number(fd.get('cycle'));cfg.unit=fd.get('unit');go('overview');toast('卡片设置已保存 · 设计预览');}
+  }
+  root.addEventListener('submit',e=>{e.preventDefault();if(e.target.reportValidity())saveForm(e.target);});
+  root.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.tagName==='INPUT'){const form=e.target.closest('form');if(form){e.preventDefault();if(form.reportValidity())saveForm(form);}}});
+  render();
+  const appearance={radius:22};
+  if(globalThis.Tweak) {const tweak=new Tweak({container:$('.mg-phone'),onChange:()=>root.style.setProperty('--mg-radius',appearance.radius+'px')});tweak.addSlider(appearance,'radius',{label:'内容圆角',min:12,max:28,unit:'px'});}
+})();
+</script>

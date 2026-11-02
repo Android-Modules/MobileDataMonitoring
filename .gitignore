@@ -1,0 +1,13 @@
+.private/
+.gradle/
+.idea/
+.claude/
+local.properties
+**/build/
+.DS_Store
+*.apk
+*.apk.sha256
+*.jks
+*.keystore
+# A capture of a real carrier account page; kept local only.
+design/device-current.png

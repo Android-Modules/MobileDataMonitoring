@@ -1,0 +1,44 @@
+[
+  {
+    "name": "云手机",
+    "rules": [
+      "cloud.139.com/cloudimage/app/58800/com.chinamobile.hycloudphone_6.2.0.20260206_20260206192457_signed_CHANNEL_SRC.apk"
+    ],
+    "apps": [
+      "com.chinamobile.hycloudphone"
+    ],
+    "source": "候选规则 · 适用范围待核实"
+  },
+  {
+    "name": "咪咕悦读",
+    "rules": [
+      "cdn3.cmread.com/operation/terminal/cpxiezongyou/1776948314511.apk"
+    ],
+    "apps": [],
+    "source": "候选规则 · 适用范围待核实"
+  },
+  {
+    "name": "咪咕快游",
+    "rules": [
+      "gcache.migu.cn/prod/upload/game_resource/channel_for_homepage_game2/202506/1210/08/20250612100822356.mp4"
+    ],
+    "apps": [],
+    "source": "候选规则 · 适用范围待核实"
+  },
+  {
+    "name": "咪咕音乐",
+    "rules": [
+      "freetyst.nf.migu.cn/public/product5th/product27/2018/12/21/2018年08月01日09点53分内容准入华纳582首/标清高清/MP3_128_16_Stero/6005751EEL6.mp3"
+    ],
+    "apps": [],
+    "source": "候选规则 · 适用范围待核实"
+  },
+  {
+    "name": "中移网大定向",
+    "rules": [
+      "wangda.chinamobile.com/default/M00/wangda_3.10.11.apk"
+    ],
+    "apps": [],
+    "source": "候选规则 · 适用范围待核实"
+  }
+]
