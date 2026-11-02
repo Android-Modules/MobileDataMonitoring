@@ -1,3 +1,10 @@
+# 0.9.3–0.9.4 SukiSU Ultra 等 Root 方案的 SELinux 兼容
+
+| 等级 | 问题 | 修复与验证 |
+| --- | --- | --- |
+| P0 | 小米 13 Ultra（SukiSU Ultra）上应用、电话进程及联通 App 连接守护进程 socket 均被拒（`connectto … tcontext=u:r:su:s0`）：模块界面停在“连接未完成”，电话保护无心跳，联通查询连接无法建立 | 经用户确认，守护进程启动和保存流量包设置时，按本应用、电话进程(radio)及联通／江苏 App／规则执行器／绑定应用的目标版本求出所在应用域，用 `ksud sepolicy check/patch`（或 magiskpolicy --live）各加一条“允许连接本进程所在域的 unix socket”；工具缺失时跳过 |
+| 注意 | `untrusted_app` 为所有新版普通应用的域，规则放开后普通应用均可连接 su 域 socket | 用户已知情并确认；守护进程仍按调用方 UID 与包名核验请求。K70／K90 原策略已允许，不受影响 |
+
 # 0.9.2 联通偶发失败不误判为登录失效
 
 | 等级 | 问题 | 修复与验证 |

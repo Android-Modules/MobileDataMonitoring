@@ -2,7 +2,7 @@
 
 双卡流量监控与额度保护模块，原生 Android 页面、Root 独立账本、libxposed API 102。参考相邻 ppx 工程接入现代 Xposed API，不占用 VPN 槽位。
 
-当前版本 **0.9.2**（versionCode 39），最低 Android 14。生产签名包已安装至 Redmi K70（Android 17 / HyperOS 4）；Redmi K90（Android 16 / HyperOS 3，主用户及分身）为 0.9.1。中国移动江苏 App 只用于江苏移动号码，归属地按号码查系统号码库，SIM 无号码时用关联号码或 ICCID 省份码；其他移动号码使用网上营业厅或短信。总览用一条细条显示限制状态（通用／累计开关，Wi-Fi 暂停时带“Wi-Fi 暂停中”标签），点击进入设置、KernelSU、LSPosed 2.2.1；其他机型的电话接口仍需验证。
+当前版本 **0.9.4**（versionCode 41），最低 Android 14。生产签名包已安装至小米 13 Ultra（Android 16 / HyperOS 3，SukiSU Ultra）；Redmi K70（Android 17 / HyperOS 4）为 0.9.2，Redmi K90（Android 16 / HyperOS 3，主用户及分身）为 0.9.1。部分 Root 方案的 SELinux 策略不允许应用和电话进程连接 su 域 socket，守护进程启动时用 Root 管理器自带工具（ksud／magiskpolicy）为流量守卫、电话进程及被观察应用实际所在的应用域各添加一条“连接 su 域 socket”规则，重启后自动重加。中国移动江苏 App 只用于江苏移动号码，归属地按号码查系统号码库，SIM 无号码时用关联号码或 ICCID 省份码；其他移动号码使用网上营业厅或短信。总览用一条细条显示限制状态（通用／累计开关，Wi-Fi 暂停时带“Wi-Fi 暂停中”标签），点击进入设置、KernelSU、LSPosed 2.2.1；其他机型的电话接口仍需验证。
 
 ## 使用
 

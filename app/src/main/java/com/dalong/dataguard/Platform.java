@@ -11,6 +11,7 @@ import java.lang.reflect.*;
 import java.nio.file.*;
 import java.security.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import org.json.*;
 
 /** Runs only in the root helper. Raw SIM identifiers never leave this process. */
@@ -465,6 +466,57 @@ public final class Platform {
       if (p.uid / 100000 == user && p.pkgList != null && Arrays.asList(p.pkgList).contains(pkg))
         return true;
     return false;
+  }
+
+  static final Set<String> allowedDomains = ConcurrentHashMap.newKeySet();
+
+  /**
+   * Some root managers' policy keeps the phone process, or an app built for an older Android, from
+   * this worker's socket. One narrow rule per such domain is added with the manager's own tool:
+   * that domain may connect to this worker's domain, nothing more. Rules last until reboot.
+   */
+  static void allowSocket(Collection<String> sources) {
+    try {
+      String[] context =
+          new String(Files.readAllBytes(Path.of("/proc/self/attr/current"))).trim().split(":");
+      if (context.length < 3 || !context[2].matches("[a-z_]+")) return;
+      for (String source : sources) {
+        if (!source.matches("[a-z0-9_]+") || allowedDomains.contains(source)) continue;
+        String rule = "allow " + source + " " + context[2] + " unix_stream_socket connectto";
+        if (policy(rule)) allowedDomains.add(source);
+      }
+    } catch (Exception keepGoing) {
+      // Without the rule the phone guard still enforces the synced list on its own.
+    }
+  }
+
+  static boolean policy(String rule) throws Exception {
+    String ksud = "/data/adb/ksu/bin/ksud";
+    if (new java.io.File(ksud).canExecute())
+      return run(ksud, "sepolicy", "check", rule) && run(ksud, "sepolicy", "patch", rule);
+    String[] tools = {"/data/adb/magisk/magiskpolicy", "/data/adb/ap/bin/magiskpolicy"};
+    for (String tool : tools)
+      if (new java.io.File(tool).canExecute()) return run(tool, "--live", rule);
+    return false;
+  }
+
+  static boolean run(String... command) throws Exception {
+    Process p = new ProcessBuilder(command).redirectErrorStream(true).start();
+    p.getInputStream().readAllBytes();
+    return p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS) && p.exitValue() == 0;
+  }
+
+  /** The app domain Android assigns by target SDK. */
+  static String appDomain(int targetSdk) {
+    return targetSdk >= 34
+        ? "untrusted_app"
+        : targetSdk >= 32
+            ? "untrusted_app_32"
+            : targetSdk >= 30
+                ? "untrusted_app_30"
+                : targetSdk >= 29
+                    ? "untrusted_app_29"
+                    : targetSdk >= 26 ? "untrusted_app_27" : "untrusted_app_25";
   }
 
   /** This app's own reader page for the web service hall, placed on the given display. */

@@ -38,12 +38,45 @@ final class GuardDaemon {
     store.data.remove("hookAt");
     store.data.put("recoveryRequired", strict());
     store.save();
+    allowHookedProcesses();
     refreshSupervisor();
     if (strict()) {
       platform.setData(platform.defaultSub(), false);
       if (platform.activeSub() >= 0 && platform.activeSub() != platform.defaultSub())
         platform.setData(platform.activeSub(), false);
     }
+  }
+
+  /** The processes that talk to this worker: this app, the phone guard and the apps it observes. */
+  void allowHookedProcesses() {
+    Set<String> packages =
+        new HashSet<>(
+            Set.of(
+                "com.dalong.dataguard",
+                UnicomSession.PACKAGE,
+                Platform.MOBILE_APP,
+                "com.paoman.lema"));
+    try {
+      JSONObject cards = store.config().optJSONObject("cards");
+      for (Iterator<String> it = cards == null ? Collections.emptyIterator() : cards.keys();
+          it.hasNext(); ) {
+        JSONArray packs = cards.getJSONObject(it.next()).optJSONArray("packages");
+        for (int i = 0; packs != null && i < packs.length(); i++) {
+          JSONArray apps = packs.getJSONObject(i).optJSONArray("apps");
+          for (int j = 0; apps != null && j < apps.length(); j++) packages.add(apps.optString(j));
+        }
+      }
+    } catch (Exception ignored) {
+    }
+    Set<String> domains = new LinkedHashSet<>(Set.of("radio"));
+    for (String pkg : packages)
+      try {
+        domains.add(
+            Platform.appDomain(
+                platform.context.getPackageManager().getApplicationInfo(pkg, 0).targetSdkVersion));
+      } catch (Exception notInstalled) {
+      }
+    Platform.allowSocket(domains);
   }
 
   /** Fail-closed behaviour belongs to debug sessions; a phone in daily use keeps its network. */
@@ -262,6 +295,7 @@ final class GuardDaemon {
         break;
       case "config":
         saveConfig(r.getJSONObject("config"));
+        allowHookedProcesses();
         break;
       case "stop":
         stop("用户停止移动数据");
