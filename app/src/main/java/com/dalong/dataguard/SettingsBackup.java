@@ -8,7 +8,15 @@ import org.json.*;
 final class SettingsBackup {
   static final String FORMAT = "DATAGUARD_SETTINGS";
   static final Set<String> GLOBAL =
-      Set.of("mode", "enabled", "fixedSlot", "budgetEnabled", "budgetLimit", "pauseOnWifi", "scheduleHours");
+      Set.of(
+          "mode",
+          "enabled",
+          "fixedSlot",
+          "budgetEnabled",
+          "budgetLimit",
+          "pauseOnWifi",
+          "scheduleMinutes",
+          "localSyncMinutes");
   static final Set<String> CARD =
       Set.of("alias", "cycleDay", "reserve", "numberKey", "numberMasked", "numberSource", "province");
   static final Set<String> VOLATILE_PACK =
@@ -69,6 +77,8 @@ final class SettingsBackup {
     JSONObject next = new JSONObject(daemon.store.config().toString());
     JSONObject global = backup.getJSONObject("settings"), cards = backup.getJSONObject("cards");
     for (String key : GLOBAL) if (global.has(key)) next.put(key, global.get(key));
+    if (!global.has("scheduleMinutes") && global.has("scheduleHours"))
+      next.put("scheduleMinutes", GuardStore.scheduleMinutes(global.optInt("scheduleHours", 2)));
     if ("fixed".equals(next.optString("mode"))
         && daemon.findCard(next.optInt("fixedSlot")) == null) next.put("mode", "stop");
     JSONObject all = next.getJSONObject("cards");

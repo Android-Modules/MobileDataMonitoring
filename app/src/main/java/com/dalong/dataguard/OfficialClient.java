@@ -175,7 +175,7 @@ final class OfficialClient {
       synchronized (daemon) {
         due =
             System.currentTimeMillis() - daemon.store.data.optLong("officialAttemptAt")
-                >= daemon.store.config().optInt("scheduleHours", 2) * 3600000L;
+                >= GuardDaemon.officialMinutes(daemon.store.config()) * 60000L;
       }
       if (due) refresh(daemon);
     } catch (Exception ignored) {

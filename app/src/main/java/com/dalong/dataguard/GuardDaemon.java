@@ -19,7 +19,7 @@ final class GuardDaemon {
   final Map<String, JSONObject> usage = new ConcurrentHashMap<>();
   volatile JSONArray cards = new JSONArray();
   volatile String fault = "", statsFault = "", receipt = "等待首次采样";
-  volatile long sampleAt, statsAt;
+  volatile long sampleAt, statsAt, statsPolledAt, statsPolledCount;
   volatile int activeSlot, defaultSlot;
   volatile boolean dataOn;
   /** The off-then-on steps of a card switch are one action in the log, not two outages. */
@@ -987,6 +987,23 @@ final class GuardDaemon {
     try {
       JSONArray list = platform.cards();
       long now = System.currentTimeMillis();
+      long every, counted;
+      synchronized (this) {
+        every = localSyncMinutes(store.config()) * 60000L;
+        counted = store.data.optLong("budgetUsed");
+      }
+      // Without a poll the system history only advances every few MB or half hour. Heavy use
+      // polls sooner, so directed apps' traffic leaves general within one refresh.
+      if (now - statsPolledAt >= every - 5000
+          || (counted - statsPolledCount >= 20_000_000 && now - statsPolledAt >= 25000)) {
+        statsPolledAt = now;
+        statsPolledCount = counted;
+        try {
+          platform.pollStats();
+        } catch (Exception pollUnavailable) {
+          // The history still advances on the system's own schedule.
+        }
+      }
       for (int i = 0; i < list.length(); i++) {
         JSONObject card = list.getJSONObject(i);
         int day;
@@ -997,9 +1014,13 @@ final class GuardDaemon {
         JSONObject result =
             platform
                 .usage(card.getInt("subId"), start, now)
+                .put("identity", card.getString("identity"))
                 .put("cycleStart", start)
                 .put("at", now);
         usage.put(card.getString("identity"), result);
+        synchronized (this) {
+          extendDirectedBaseline(card);
+        }
       }
       statsAt = now;
       statsFault = "";
@@ -1023,18 +1044,134 @@ final class GuardDaemon {
     return raw;
   }
 
+  /**
+   * Cellular bytes since the general baseline: the history's growth, or the live counters' growth
+   * since the baseline when they ran ahead. The counters' drift before the baseline is not charged.
+   */
+  long sinceBaseline(JSONObject c, JSONObject u, JSONObject snap) {
+    long raw = u.optLong("raw", -1), rawAt = snap.optLong("rawAt", -1);
+    if (raw < 0 || rawAt < 0 || raw < rawAt) return -1;
+    long since = raw - rawAt, at = snap.optLong("protectedAt", -1);
+    JSONObject p = c.optJSONObject("protectedUsage");
+    if (p != null
+        && at >= 0
+        && p.optLong("cycleStart", -1) == snap.optLong("cycleStart", -2)
+        && p.optLong("used", -1) >= at) since = Math.max(since, p.optLong("used") - at);
+    return since;
+  }
+
+  /** Ties the live counters to a baseline: until now they are taken to agree with the history. */
+  void anchorCounters(JSONObject c, JSONObject snap, JSONObject u) throws JSONException {
+    JSONObject p = c.optJSONObject("protectedUsage");
+    long cycle = snap.optLong("cycleStart", -1);
+    if (snap.has("protectedAt")
+        || p == null
+        || u == null
+        || p.optLong("cycleStart", -2) != cycle
+        || u.optLong("cycleStart", -2) != cycle) return;
+    long history = Math.max(0, u.optLong("raw", -1) - snap.optLong("rawAt"));
+    snap.put("protectedAt", Math.max(0, p.optLong("used") - history));
+  }
+
+  boolean based(JSONObject snap, JSONObject u) {
+    return snap != null
+        && snap.optLong("rawAt", -1) >= 0
+        && snap.optLong("used", -1) >= 0
+        && snap.optLong("cycleStart", -1) == u.optLong("cycleStart", -2);
+  }
+
   long remaining(JSONObject c, JSONObject u) {
     if (u == null) return -1;
     JSONObject snap = c.optJSONObject("calibration");
+    long raw = protectedRaw(c, u);
+    if (based(snap, u)) {
+      long since = sinceBaseline(c, u, snap);
+      // A regressed history keeps raw below the baseline, which yields unknown, never a refund.
+      raw = since < 0 ? u.optLong("raw", -1) : snap.optLong("rawAt") + since;
+    }
     return UsageMath.generalRemaining(
         c.optLong("quota", -1),
-        protectedRaw(c, u),
+        raw,
         u.optLong("cycleStart", -1),
         UsageMath.carrierCycleStart(System.currentTimeMillis(), c.optInt("cycleDay", 1)),
         snap == null ? -1 : snap.optLong("used", -1),
         snap == null ? -1 : snap.optLong("rawAt", -1),
         snap == null ? -1 : snap.optLong("cycleStart", -1),
-        snap == null ? -1 : snap.optLong("remaining", -1));
+        snap == null ? -1 : snap.optLong("remaining", -1),
+        directedSince(c, u));
+  }
+
+  /** Each package's usage and balance at a general baseline, so its later traffic is not general. */
+  JSONObject directedBaseline(JSONObject card, JSONObject uids) throws Exception {
+    JSONObject out = new JSONObject();
+    JSONArray packs = cardConfig(card).getJSONArray("packages");
+    Map<String, Long> refs = DirectedPackages.references(this, card, uids);
+    for (int i = 0; i < packs.length(); i++) {
+      JSONObject pack = packs.getJSONObject(i);
+      long ref = refs.getOrDefault(pack.optString("id"), 0L);
+      out.put(
+          pack.optString("id"),
+          new JSONObject()
+              .put("ref", ref)
+              .put("left", DirectedPackages.balance(this, card, pack, ref).optLong("remaining", -1)));
+    }
+    return out;
+  }
+
+  /** Bytes directed packages claimed since the general baseline; zero when unattributable. */
+  long directedSince(JSONObject c, JSONObject u) {
+    try {
+      JSONObject snap = c.optJSONObject("calibration"),
+          base = snap == null ? null : snap.optJSONObject("directed");
+      if (base == null || base.length() == 0 || u.optString("identity").isEmpty()) return 0;
+      Map<String, Long> now = DirectedPackages.references(this, findCardByIdentity(u.optString("identity")));
+      List<String> ids = new ArrayList<>();
+      for (Iterator<String> it = base.keys(); it.hasNext(); ) {
+        String id = it.next();
+        if (now.containsKey(id)) ids.add(id);
+      }
+      long[] at = new long[ids.size()], current = new long[ids.size()], left = new long[ids.size()];
+      for (int i = 0; i < ids.size(); i++) {
+        JSONObject b = base.getJSONObject(ids.get(i));
+        at[i] = b.optLong("ref");
+        current[i] = now.get(ids.get(i));
+        left[i] = b.optLong("left", -1);
+      }
+      return UsageMath.directedSince(at, current, left);
+    } catch (Exception unattributable) {
+      return 0;
+    }
+  }
+
+  /** A package added after the baseline claims only its traffic from the moment it is first seen. */
+  void extendDirectedBaseline(JSONObject card) throws Exception {
+    JSONObject c = cardConfig(card), snap = c.optJSONObject("calibration");
+    if (snap == null || snap.optLong("cycleStart", -1) != DirectedPackages.cycle(c)) return;
+    anchorCounters(c, snap, usage.get(card.getString("identity")));
+    JSONObject base = snap.optJSONObject("directed");
+    if (base == null) snap.put("directed", base = new JSONObject());
+    JSONArray packs = c.getJSONArray("packages");
+    Map<String, Long> refs = null;
+    for (int i = 0; i < packs.length(); i++) {
+      JSONObject pack = packs.getJSONObject(i);
+      String id = pack.optString("id");
+      if (base.has(id)) continue;
+      if (refs == null) refs = DirectedPackages.references(this, card);
+      long ref = refs.getOrDefault(id, 0L);
+      base.put(
+          id,
+          new JSONObject()
+              .put("ref", ref)
+              .put("left", DirectedPackages.balance(this, card, pack, ref).optLong("remaining", -1)));
+    }
+  }
+
+  static int officialMinutes(JSONObject config) {
+    return config.optInt("scheduleMinutes", 10);
+  }
+
+  static int localSyncMinutes(JSONObject config) {
+    return config.optInt("localSyncMinutes", 1);
   }
 
   long cumulativeLimit() throws Exception {
@@ -1071,6 +1208,12 @@ final class GuardDaemon {
         + " / 上限 "
         + gb(cumulativeLimit())
         + "），与运营商通用、定向余额分别计算";
+  }
+
+  static String minutesLabel(int minutes) {
+    if (minutes % 1440 == 0) return "每 " + minutes / 1440 + " 天";
+    if (minutes % 60 == 0) return "每 " + minutes / 60 + " 小时";
+    return "每 " + minutes + " 分钟";
   }
 
   static String gb(long n) {
@@ -1116,7 +1259,8 @@ final class GuardDaemon {
     if (now - c.optLong("generalBaselineAttempt") < 30000) return;
     c.put("generalBaselineAttempt", now);
     try {
-      long rawAt = platform.usage(card.getInt("subId"), cycle, at).getLong("raw");
+      JSONObject history = platform.usage(card.getInt("subId"), cycle, at);
+      long rawAt = history.getLong("raw");
       if (rawAt < 0) return;
       c.put(
           "calibration",
@@ -1124,14 +1268,37 @@ final class GuardDaemon {
               .put("used", general.getLong("used"))
               .put("remaining", general.optLong("remaining", -1))
               .put("rawAt", rawAt)
+              .put("directed", directedBaseline(card, history.optJSONObject("uids")))
               .put("asOf", at)
               .put("cycleStart", cycle)
               .put("fetchedAt", now)
               .put("source", "本卡官方通用余量"));
+      anchorCounters(c, c.getJSONObject("calibration"), usage.get(card.getString("identity")));
       c.put("officialCalibrationAt", at).put("generalBaselineSignature", signature);
     } catch (Exception ignored) {
       // Keep any previous baseline and retry at the next bounded opportunity.
     }
+  }
+
+  /** What decides which traffic a package claims: its apps, rules, matching mode and order. */
+  static String attribution(JSONObject c) {
+    JSONArray packs = c.optJSONArray("packages");
+    StringBuilder out = new StringBuilder();
+    for (int i = 0; packs != null && i < packs.length(); i++) {
+      JSONObject p = packs.optJSONObject(i);
+      if (p == null) continue;
+      out.append(p.optString("id"))
+          .append('|')
+          .append(p.optJSONArray("apps"))
+          .append('|')
+          .append(p.optJSONArray("rules"))
+          .append('|')
+          .append(p.optBoolean("requireBoth"))
+          .append('|')
+          .append(p.optInt("priority", 100))
+          .append(';');
+    }
+    return out.toString();
   }
 
   static String generalSignature(JSONObject general, long cycle) {
@@ -1162,8 +1329,11 @@ final class GuardDaemon {
     }
     config.put("budgetEnabled", config.optBoolean("budgetEnabled", false));
     config.put("pauseOnWifi", config.optBoolean("pauseOnWifi", true));
-    int hours = config.optInt("scheduleHours", 2);
-    if (hours < 1 || hours > 168) throw new IllegalArgumentException("查询间隔非法");
+    config.remove("scheduleHours");
+    int minutes = officialMinutes(config), localMinutes = localSyncMinutes(config);
+    if (minutes < 1 || minutes > 10080) throw new IllegalArgumentException("官方查询间隔应为 1–10080 分钟");
+    if (localMinutes < 1 || localMinutes > 60) throw new IllegalArgumentException("本机统计同步间隔应为 1–60 分钟");
+    config.put("scheduleMinutes", minutes).put("localSyncMinutes", localMinutes);
     JSONObject all = config.getJSONObject("cards");
     // A form built from an older status cannot drop a card or its permission.
     JSONObject stored = previous.getJSONObject("cards");
@@ -1197,6 +1367,10 @@ final class GuardDaemon {
           c.remove(owned);
           if (current.has(owned)) c.put(owned, current.get(owned));
         }
+      JSONObject snap = c.optJSONObject("calibration");
+      // Rebinding apps or rules moves their whole cycle into a package at once; claims restart now.
+      if (current != null && snap != null && !attribution(current).equals(attribution(c)))
+        c.put("calibration", new JSONObject(snap.toString())).getJSONObject("calibration").remove("directed");
       int day = c.optInt("cycleDay", 1);
       if (day < 1 || day > 31 || c.optLong("quota", -1) < -1 || c.optLong("reserve", 0) < 0)
         throw new IllegalArgumentException("额度／账期不合法");
@@ -1302,7 +1476,10 @@ final class GuardDaemon {
           "Wi-Fi 暂停限制："
               + onOff(config.optBoolean("pauseOnWifi", true))
               + "；保存后按当前默认网络重新核验，原额度开关和数值不变");
-    if (hours != previous.optInt("scheduleHours", 2)) changes.add("官方查询间隔设置为 " + hours + " 小时");
+    if (minutes != officialMinutes(previous))
+      changes.add("官方查询间隔设置为 " + minutesLabel(minutes) + "；短信查询自动发送最多每小时一次");
+    if (localMinutes != localSyncMinutes(previous))
+      changes.add("本机统计同步间隔设置为 " + minutesLabel(localMinutes));
     if (limit != previous.optLong("budgetLimit")
         || config.optBoolean("budgetEnabled") != previous.optBoolean("budgetEnabled"))
       changes.add(
@@ -1485,6 +1662,7 @@ final class GuardDaemon {
     long left = r.getLong("remaining"), now = System.currentTimeMillis();
     if (left < 0) throw new IllegalArgumentException("剩余流量不能为负");
     long cycle = UsageMath.carrierCycleStart(now, c.optInt("cycleDay", 1));
+    JSONObject history = platform.usage(card.getInt("subId"), cycle, now);
     c.put("quota", left)
         .put("officialQuotaManaged", false)
         .put(
@@ -1492,11 +1670,13 @@ final class GuardDaemon {
             new JSONObject()
                 .put("used", 0)
                 .put("remaining", left)
-                .put("rawAt", platform.usage(card.getInt("subId"), cycle, now).getLong("raw"))
+                .put("rawAt", history.getLong("raw"))
+                .put("directed", directedBaseline(card, history.optJSONObject("uids")))
                 .put("asOf", now)
                 .put("cycleStart", cycle)
                 .put("fetchedAt", now)
                 .put("source", "手动设置余量"));
+    anchorCounters(c, c.getJSONObject("calibration"), history.put("cycleStart", cycle));
     // Forget the last official figures, so even an unchanged balance replaces this manual value.
     c.remove("generalBaselineSignature");
     c.remove("officialCalibrationAt");
@@ -1521,14 +1701,16 @@ final class GuardDaemon {
             .put("used", used)
             .put("asOf", at)
             .put("rawAt", u.getLong("raw"))
+            .put("directed", directedBaseline(card, u.optJSONObject("uids")))
             .put("cycleStart", cycle)
             .put("fetchedAt", now)
             .put("source", "手动官方快照");
     c.put("calibration", snap);
+    anchorCounters(c, snap, usage.get(card.getString("identity")));
     JSONArray history = store.data.getJSONArray("snapshots");
     if (history.length() > 100) history.remove(0);
     history.put(snap);
-    store.event("已校准本卡通用用量；此后新增蜂窝用量暂按通用计入，原始总账保持不变");
+    store.event("已校准本卡通用用量；此后定向包应用和规则的用量从定向扣减，其余蜂窝用量按通用计入，原始总账保持不变");
   }
 
   synchronized JSONObject health() throws Exception {
@@ -1538,7 +1720,7 @@ final class GuardDaemon {
         .put("sampleAt", sampleAt)
         .put("blockedSubs", blockedSubs())
         .put("pauseOnWifi", store.config().optBoolean("pauseOnWifi", true))
-        .put("scheduleHours", store.config().optInt("scheduleHours", 2))
+        .put("scheduleMinutes", officialMinutes(store.config()))
         .put("wifiConnected", wifiConnected)
         .put("wifiPaused", wifiPaused)
         .put("fault", fault.isEmpty() ? statsFault : fault)
@@ -1587,6 +1769,23 @@ final class GuardDaemon {
       card.put("config", config)
           .put("usage", u == null ? new JSONObject() : u)
           .put("remaining", remaining(config, u));
+      JSONObject snap = config.optJSONObject("calibration");
+      long since = u == null || !based(snap, u) ? -1 : sinceBaseline(config, u, snap);
+      if (since >= 0 && snap.optLong("cycleStart", -1) == DirectedPackages.cycle(config)) {
+        long directed = Math.min(since, directedSince(config, u));
+        long left = snap.optLong("remaining", -1);
+        long general = UsageMath.generalSince(since, directed);
+        card.put(
+            "localSince",
+            new JSONObject()
+                .put("asOf", snap.optLong("asOf"))
+                .put("source", snap.optString("source"))
+                .put("total", since)
+                .put("directed", directed)
+                .put("general", general)
+                .put("baseRemaining", left)
+                .put("remaining", left < 0 ? -1 : Math.max(0, left - general)));
+      }
       out.put(card);
     }
     return new JSONObject()

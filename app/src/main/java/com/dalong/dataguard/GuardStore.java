@@ -29,7 +29,8 @@ final class GuardStore {
                       .put("budgetEnabled", false)
                       .put("pauseOnWifi", true)
                       .put("budgetLimit", 1_000_000_000L)
-                      .put("scheduleHours", 2))
+                      .put("scheduleMinutes", 10)
+                      .put("localSyncMinutes", 1))
               .put("budgetUsed", 0)
               .put("seeded", true)
               .put("counters", new JSONObject())
@@ -102,6 +103,18 @@ final class GuardStore {
       data.put("neutralRuleLabelsMigrated", true);
       save();
     }
+    if (!config().has("scheduleMinutes")) {
+      config()
+          .put("scheduleMinutes", scheduleMinutes(config().optInt("scheduleHours", 2)))
+          .put("localSyncMinutes", config().optInt("localSyncMinutes", 1))
+          .remove("scheduleHours");
+      save();
+    }
+  }
+
+  /** The old two-hour default becomes the new ten-minute one; a chosen interval is kept. */
+  static int scheduleMinutes(int hours) {
+    return hours == 2 ? 10 : Math.max(1, Math.min(168, hours)) * 60;
   }
 
   synchronized void save() throws Exception {

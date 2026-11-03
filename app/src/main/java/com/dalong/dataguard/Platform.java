@@ -163,18 +163,26 @@ public final class Platform {
     return id;
   }
 
-  public JSONObject usage(int sub, long start, long end) throws Exception {
-    String id = imsi(sub);
-    // The root process has no package UID. The privileged session avoids claiming
-    // that package "android" belongs to UID 0, which Android 16 correctly rejects.
+  static Object netstats() throws Exception {
     Object binder =
         Class.forName("android.os.ServiceManager")
             .getMethod("getService", String.class)
             .invoke(null, "netstats");
-    Object service =
-        Class.forName("android.net.INetworkStatsService$Stub")
-            .getMethod("asInterface", android.os.IBinder.class)
-            .invoke(null, binder);
+    return Class.forName("android.net.INetworkStatsService$Stub")
+        .getMethod("asInterface", android.os.IBinder.class)
+        .invoke(null, binder);
+  }
+
+  /** Folds the kernel's latest per-app counters into the history, as the data usage page does. */
+  void pollStats() throws Exception {
+    call(netstats(), "forceUpdate", new Class<?>[0]);
+  }
+
+  public JSONObject usage(int sub, long start, long end) throws Exception {
+    String id = imsi(sub);
+    // The root process has no package UID. The privileged session avoids claiming
+    // that package "android" belongs to UID 0, which Android 16 correctly rejects.
+    Object service = netstats();
     Object session = call(service, "openSession", new Class<?>[0]);
     Class<?> templateClass = Class.forName("android.net.NetworkTemplate");
     Class<?> builderClass = Class.forName("android.net.NetworkTemplate$Builder");

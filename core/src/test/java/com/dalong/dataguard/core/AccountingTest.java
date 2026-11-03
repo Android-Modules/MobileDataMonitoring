@@ -172,6 +172,23 @@ public class AccountingTest {
   }
 
   @Test
+  public void directedTrafficSinceBaselineLeavesGeneralAlone() {
+    // 100 new bytes, 70 of them claimed by a directed package: general pays only 30.
+    assertEquals(570, UsageMath.generalRemaining(1000, 5100, 20, 20, 400, 5000, 20, 600, 70));
+    // A claim larger than all cellular traffic cannot refund general allowance.
+    assertEquals(600, UsageMath.generalRemaining(1000, 5100, 20, 20, 400, 5000, 20, 600, 500));
+    assertEquals(30, UsageMath.generalSince(100, 70));
+    assertEquals(100, UsageMath.generalSince(100, -5));
+    // Growth is capped by each package's balance at the baseline; unknown balance is uncapped.
+    assertEquals(
+        40 + 25 + 0,
+        UsageMath.directedSince(
+            new long[] {100, 10, 0}, new long[] {140, 60, 90}, new long[] {-1, 25, 0}));
+    // A history regression claims nothing.
+    assertEquals(0, UsageMath.directedSince(new long[] {100}, new long[] {80}, new long[] {-1}));
+  }
+
+  @Test
   public void independentCumulativeCapAndCarrierAllowanceAreSeparate() {
     var stopped =
         new PolicyEngine.Input(

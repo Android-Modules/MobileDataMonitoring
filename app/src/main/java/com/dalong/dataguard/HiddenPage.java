@@ -24,6 +24,8 @@ final class HiddenPage {
   static final long LOAD_MS = 45000;
 
   static final AtomicBoolean running = new AtomicBoolean();
+  static final long SMS_EVERY_MS = 3600000;
+  static final Map<String, Long> failureLoggedAt = new HashMap<>();
   /** When the official app last showed its login screen; a read in progress stops there. */
   static volatile long loginAt;
 
@@ -53,7 +55,8 @@ final class HiddenPage {
       String identity,
       long waitMs,
       Launch launch,
-      java.util.function.LongPredicate gaveUp)
+      java.util.function.LongPredicate gaveUp,
+      Runnable cleanUp)
       throws Exception {
     long since = System.currentTimeMillis();
     var wake =
@@ -90,6 +93,8 @@ final class HiddenPage {
       }
       return false;
     } finally {
+      // Tasks still on a display being released make HyperOS bring Home to the real screen.
+      cleanUp.run();
       display.release();
       reader.close();
       frames.quitSafely();
@@ -109,16 +114,15 @@ final class HiddenPage {
       // Without a list nothing is removed afterwards: the user's own tasks are never guessed at.
       tasks = null;
     }
-    try {
-      return onDisplay(
-          daemon,
-          identity,
-          LOAD_MS,
-          d -> daemon.platform.openMobile(user, route, d),
-          since -> loginAt >= since);
-    } finally {
-      cleanUp(daemon, Platform.MOBILE_APP, user, tasks, wasRunning);
-    }
+    Set<Integer> before = tasks;
+    boolean keepRunning = wasRunning;
+    return onDisplay(
+        daemon,
+        identity,
+        LOAD_MS,
+        d -> daemon.platform.openMobile(user, route, d),
+        since -> loginAt >= since,
+        () -> cleanUp(daemon, Platform.MOBILE_APP, user, before, keepRunning));
   }
 
   /**
@@ -196,22 +200,20 @@ final class HiddenPage {
     } catch (Exception unknown) {
       tasks = null;
     }
-    try {
-      return onDisplay(
-          daemon,
-          identity,
-          LOAD_MS + 10000,
-          d -> daemon.platform.openWebRead(identity, d),
-          since -> {
-            synchronized (daemon) {
-              JSONObject card = daemon.store.data.optJSONObject("webCard");
-              return card == null || !identity.equals(card.optString("identity"));
-            }
-          });
-    } finally {
-      // Only the reader's own task goes; this app keeps running for its other work.
-      cleanUp(daemon, self, 0, tasks, true);
-    }
+    Set<Integer> before = tasks;
+    return onDisplay(
+        daemon,
+        identity,
+        LOAD_MS + 10000,
+        d -> daemon.platform.openWebRead(identity, d),
+        since -> {
+          synchronized (daemon) {
+            JSONObject card = daemon.store.data.optJSONObject("webCard");
+            return card == null || !identity.equals(card.optString("identity"));
+          }
+        },
+        // Only the reader's own task goes; this app keeps running for its other work.
+        () -> cleanUp(daemon, self, 0, before, true));
   }
 
   /** Unattended: one quiet attempt per card and interval, with SMS as the user-enabled backup. */
@@ -219,9 +221,10 @@ final class HiddenPage {
     JSONArray due = new JSONArray();
     long now = System.currentTimeMillis();
     synchronized (daemon) {
-      long interval = daemon.store.config().optInt("scheduleHours", 2) * 3600000L;
+      long interval = GuardDaemon.officialMinutes(daemon.store.config()) * 60000L;
       JSONObject routes = daemon.store.data.optJSONObject("mobileRoutes"),
-          fresh = OfficialClient.byCard(daemon);
+          fresh = OfficialClient.byCard(daemon),
+          texted = daemon.store.data.optJSONObject("smsScheduledAt");
       for (int i = 0; i < daemon.cards.length(); i++) {
         JSONObject card = daemon.cards.getJSONObject(i), c = daemon.cardConfig(card);
         String id = card.getString("identity");
@@ -234,10 +237,18 @@ final class HiddenPage {
         boolean page = route != null && daemon.queryRouteUsable() && daemon.jiangsuApp(card);
         JSONObject webCard = daemon.store.data.optJSONObject("webCard");
         boolean web = webCard != null && id.equals(webCard.optString("identity"));
-        if (!web && !page && !c.optBoolean("smsSync")) continue;
+        // A short query interval must not turn into a text message every few minutes.
+        boolean sms =
+            c.optBoolean("smsSync")
+                && now - (texted == null ? 0 : texted.optLong(id)) >= Math.max(interval, SMS_EVERY_MS);
+        if (!web && !page && !sms) continue;
         c.put("mobileAttemptAt", now);
         JSONObject item =
-            new JSONObject().put("id", id).put("user", c.optInt("officialUser", 0)).put("web", web);
+            new JSONObject()
+                .put("id", id)
+                .put("user", c.optInt("officialUser", 0))
+                .put("web", web)
+                .put("sms", sms);
         if (page) item.put("route", route);
         due.put(item);
       }
@@ -262,16 +273,24 @@ final class HiddenPage {
       }
       if (done) continue;
       synchronized (daemon) {
-        if (daemon.cardConfig(daemon.findCardByIdentity(id)).optBoolean("smsSync"))
+        long at = System.currentTimeMillis();
+        if (item.optBoolean("sms")
+            && daemon.cardConfig(daemon.findCardByIdentity(id)).optBoolean("smsSync")) {
+          JSONObject texted = daemon.store.data.optJSONObject("smsScheduledAt");
+          if (texted == null) daemon.store.data.put("smsScheduledAt", texted = new JSONObject());
+          texted.put(id, at);
           SmsSync.refresh(daemon, id);
-        else {
+        } else {
           OfficialClient.queryState(
               daemon,
               id,
               "error",
               OfficialClient.slotLabel(daemon, id) + "后台更新未完成，请确认官方 App 已登录",
-              System.currentTimeMillis());
-          daemon.store.event("query", "移动后台更新未完成", "未读到本卡余量，可能需要在官方 App 重新登录，也可以开启短信查询。", "");
+              at);
+          if (at - failureLoggedAt.getOrDefault(id, 0L) >= SMS_EVERY_MS) {
+            failureLoggedAt.put(id, at);
+            daemon.store.event("query", "移动后台更新未完成", "未读到本卡余量，可能需要在官方 App 重新登录，也可以开启短信查询。", "");
+          }
         }
       }
     }

@@ -12,13 +12,23 @@ final class DirectedPackages {
   }
 
   static Map<String, Long> references(GuardDaemon d, JSONObject card) throws Exception {
-    JSONObject c = d.cardConfig(card), u = d.usage.get(card.getString("identity"));
+    JSONObject u = d.usage.get(card.getString("identity"));
+    return references(
+        d,
+        card,
+        u != null && u.optLong("cycleStart", -1) == cycle(d.cardConfig(card))
+            ? u.optJSONObject("uids")
+            : null);
+  }
+
+  /** Per-package usage this cycle, from the given per-UID cellular totals and rule observations. */
+  static Map<String, Long> references(GuardDaemon d, JSONObject card, JSONObject uids)
+      throws Exception {
+    JSONObject c = d.cardConfig(card);
     long cycle = cycle(c);
     JSONObject obs = c.optJSONObject("observations");
     JSONObject counts =
         obs != null && obs.optLong("cycleStart") == cycle ? obs.optJSONObject("packages") : null;
-    JSONObject uids =
-        u != null && u.optLong("cycleStart", -1) == cycle ? u.optJSONObject("uids") : null;
     List<JSONObject> ordered = new ArrayList<>();
     JSONArray all = c.getJSONArray("packages");
     for (int i = 0; i < all.length(); i++) ordered.add(all.getJSONObject(i));

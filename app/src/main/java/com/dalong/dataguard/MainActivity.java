@@ -847,25 +847,50 @@ public final class MainActivity extends Activity {
             ui.surface));
     p.addView(top);
     ui.space(p, 2);
+    JSONObject local = card.optJSONObject("localSince");
+    // The official figure less what this phone used since; the next official read replaces it.
+    boolean live =
+        !manual
+            && general != null
+            && local != null
+            && local.optLong("remaining", -1) >= 0
+            && general.optLong("remaining", -1) >= 0
+            && local.optLong("baseRemaining", -2) == general.optLong("remaining", -1);
+    long localGeneral = live ? local.optLong("general") : 0;
     p.addView(
         ui.heading(
             manual
                 ? carrierBytes(card.optLong("remaining", -1))
-                : general == null ? "待获取" : officialAmount(general.optLong("remaining", -1)),
+                : live
+                    ? carrierBytes(local.optLong("remaining"))
+                    : general == null ? "待获取" : officialAmount(general.optLong("remaining", -1)),
             34));
     if (general != null && !manual && general.optLong("total", -1) > 0) {
+      long used = general.optLong("used", -1) < 0 ? -1 : general.optLong("used") + localGeneral;
       ui.space(p, 6);
-      progress(p, general.optLong("used", 0), general.optLong("total"));
+      progress(p, Math.max(0, used), general.optLong("total"));
       ui.space(p, 6);
       p.addView(
           ui.text(
               "已用 "
-                  + officialAmount(general.optLong("used", -1))
+                  + officialAmount(used)
                   + " · 总量 "
                   + officialAmount(general.optLong("total", -1)),
               12,
               ui.muted));
-    } else if (manual) note(p, "按此后的本地蜂窝用量扣减，官方查询成功后以官方为准。");
+    } else if (manual) note(p, "此后定向应用和规则的流量从定向扣减，其余按通用扣减；官方查询成功后以官方为准。");
+    if (live && local.optLong("total") > 0)
+      note(
+          p,
+          "官方 "
+              + new SimpleDateFormat("HH:mm", Locale.ROOT).format(new Date(local.optLong("asOf")))
+              + " 之后本机已用 "
+              + carrierBytes(local.optLong("total"))
+              + "（通用 "
+              + carrierBytes(local.optLong("general"))
+              + " · 定向 "
+              + carrierBytes(local.optLong("directed"))
+              + "），已实时扣减，下次官方同步以官方为准。");
     thresholdRow(p, card);
     LinearLayout stats = new LinearLayout(this);
     stat(
@@ -1388,8 +1413,57 @@ public final class MainActivity extends Activity {
         p,
         "clock",
         "自动更新频率",
-        "每 " + config().optInt("scheduleHours", 2) + " 小时",
+        "官方"
+            + GuardDaemon.minutesLabel(config().optInt("scheduleMinutes", 10))
+            + " · 本机统计"
+            + GuardDaemon.minutesLabel(config().optInt("localSyncMinutes", 1)),
         this::editSchedule);
+  }
+
+  /** Tapping a preset fills the field; any other typed value is the custom choice. */
+  void presets(LinearLayout p, EditText field, int... minutes) {
+    LinearLayout row = new LinearLayout(this);
+    row.setPadding(0, dp(8), 0, 0);
+    List<TextView> chips = new ArrayList<>();
+    Runnable mark =
+        () -> {
+          String typed = field.getText().toString().trim();
+          for (int i = 0; i < chips.size(); i++) {
+            boolean on = typed.equals("" + minutes[i]);
+            chips.get(i).setTextColor(on ? (ui.dark ? 0xff1b2746 : Color.WHITE) : ui.muted);
+            chips.get(i).setBackground(ui.ripple(on ? ui.accent : ui.surface, 13));
+          }
+        };
+    for (int i = 0; i < minutes.length; i++) {
+      int value = minutes[i];
+      TextView t =
+          ui.text(value % 60 == 0 ? value / 60 + " 小时" : value + " 分钟", 13, ui.muted);
+      t.setGravity(Gravity.CENTER);
+      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(36), 1);
+      if (i > 0) lp.leftMargin = dp(6);
+      row.addView(t, lp);
+      chips.add(t);
+      t.setOnClickListener(
+          v -> {
+            field.setText("" + value);
+            field.setSelection(field.length());
+          });
+    }
+    field.addTextChangedListener(
+        new android.text.TextWatcher() {
+          @Override
+          public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+          @Override
+          public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+          @Override
+          public void afterTextChanged(android.text.Editable s) {
+            mark.run();
+          }
+        });
+    mark.run();
+    p.addView(row);
   }
 
   void updateCurrent(boolean official) {
@@ -1991,7 +2065,7 @@ public final class MainActivity extends Activity {
           p,
           "通用估算以 "
               + time(baseline.optLong("asOf"))
-              + " 的官方通用已用为基准，仅追加此后的蜂窝增量；此后定向是否免流需等待官方校准，暂按通用保守计入。此前的定向总用量不会再扣通用余额。");
+              + " 的官方通用已用为基准，追加此后的蜂窝增量：定向包绑定应用和命中规则的流量从定向扣减（不超过该包当时的剩余），来源不明的按通用扣减。下次官方查询成功后直接以官方为准。");
     else note(p, "尚无本账期通用校准，蜂窝总用量暂按通用保守计入。请更新本卡官方余量或手动校准通用已用。");
   }
 
@@ -3147,16 +3221,37 @@ public final class MainActivity extends Activity {
   void editSchedule() {
     try {
       JSONObject next = copyConfig();
-      GuardUi.Sheet s = ui.sheet("官方余量自动更新", "在后台定时查询，不影响屏幕，熄屏也能运行。");
-      EditText hours =
-          ui.field(s.content, "查询间隔 · 小时", next.optInt("scheduleHours", 2) + "", true, "1–168");
-      note(s.content, "移动一次约 1 MB，联通更少。登录过期时一键更新会打开官方 App，移动也可以用短信查询。电信查询待接入。");
+      GuardUi.Sheet s = ui.sheet("自动更新频率", "在后台定时更新，不影响屏幕，熄屏也能运行。");
+      EditText official =
+          ui.field(
+              s.content,
+              "官方余量查询 · 分钟",
+              next.optInt("scheduleMinutes", 10) + "",
+              true,
+              "可直接输入，最少 1 分钟");
+      presets(s.content, official, 1, 5, 10, 30, 60);
+      note(
+          s.content,
+          "移动网上营业厅每次约 1 MB，联通更少；1 分钟一次每天约 1.4 GB，连接 Wi-Fi 时不耗流量。短信查询自动发送最多每小时一次。");
+      EditText local =
+          ui.field(
+              s.content,
+              "本机流量统计同步 · 分钟",
+              next.optInt("localSyncMinutes", 1) + "",
+              true,
+              "1–60");
+      presets(s.content, local, 1, 2, 5, 10);
+      note(
+          s.content,
+          "从手机系统的流量统计读取各卡和各应用用量：定向包应用或规则的流量从定向扣减，来源不明的一律按通用扣减。官方查询成功后直接以官方数据为准。");
       s.primary(
-              "保存查询计划",
+              "保存",
               () -> {
                 try {
-                  next.put("scheduleHours", integer(hours, 1, 168));
-                  submit(s, configRequest(next), "查询计划已保存");
+                  next.put("scheduleMinutes", integer(official, 1, 10080))
+                      .put("localSyncMinutes", integer(local, 1, 60));
+                  next.remove("scheduleHours");
+                  submit(s, configRequest(next), "更新频率已保存");
                 } catch (Exception e) {
                   s.error(safeError(e));
                 }
