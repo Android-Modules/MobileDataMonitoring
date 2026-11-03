@@ -21,6 +21,27 @@ public class AccountingTest {
   }
 
   @Test
+  public void activeUseFoldsWithinTwentySecondsAndIdleDoesNotPoll() {
+    long idle = 60_000;
+    assertEquals(StatsRefresh.Mode.SKIP, StatsRefresh.mode(0, 3_600_000, idle, false, 3_600_000));
+    assertEquals(
+        StatsRefresh.Mode.SKIP, StatsRefresh.mode(200_000, 120_000, idle, false, 120_000));
+    assertEquals(StatsRefresh.Mode.SKIP, StatsRefresh.mode(2_000_000, 7_000, idle, false, 7_000));
+    assertEquals(StatsRefresh.Mode.POLL, StatsRefresh.mode(2_000_000, 8_000, idle, false, 8_000));
+    assertEquals(StatsRefresh.Mode.SKIP, StatsRefresh.mode(300_000, 9_000, idle, false, 9_000));
+    assertEquals(StatsRefresh.Mode.POLL, StatsRefresh.mode(300_000, 10_000, idle, false, 10_000));
+    assertEquals(StatsRefresh.Mode.POLL, StatsRefresh.mode(300_000, idle, idle, false, idle));
+    assertEquals(StatsRefresh.Mode.READ, StatsRefresh.mode(0, 60_000, idle, true, 60_000));
+    assertEquals(StatsRefresh.Mode.SKIP, StatsRefresh.mode(0, 60_000, idle, true, 30_000));
+    assertEquals(StatsRefresh.Mode.POLL, StatsRefresh.mode(300_000, 8_000, 5_000, false, 8_000));
+  }
+
+  @Test(expected = IllegalArgumentException.class)
+  public void statsRefreshRejectsANegativeWait() {
+    StatsRefresh.mode(0, -1, 1, false, 0);
+  }
+
+  @Test
   public void debugCeilingAppliesOnlyInsideASession() {
     long now = 1000;
     assertTrue(PolicyEngine.debugExhausted(now + 1, now, PolicyEngine.DEBUG_CEILING));

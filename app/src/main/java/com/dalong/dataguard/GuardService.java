@@ -27,50 +27,65 @@ public final class GuardService extends Service {
     nm.createNotificationChannel(
         new NotificationChannel("outside", "套外流量提醒", NotificationManager.IMPORTANCE_HIGH));
     startForeground(7, notification("正在连接监控进程"));
-    worker.scheduleWithFixedDelay(
-        () -> {
-          try {
-            if (GuardApplication.off(this)) {
-              stopForeground(STOP_FOREGROUND_REMOVE);
-              stopSelf();
-              return;
-            }
-            JSONObject s;
-            try {
-              s = RootClient.action("health");
-            } catch (Exception unavailable) {
-              RootClient.start(this);
-              s = RootClient.action("health");
-            }
-            GuardApplication.syncLock(s);
-            pauseOnWifi = s.optBoolean("pauseOnWifi", true);
-            String msg = s.optString("fault");
-            if (msg.isEmpty())
-              msg =
-                  (s.optBoolean("wifiPaused") ? "Wi-Fi · 限制已暂停 · " : "")
-                      + (s.optInt("activeSlot") > 0 ? "卡 " + s.optInt("activeSlot") : "暂无数据卡")
-                      + " · "
-                      + (s.optBoolean("dataOn") ? "数据开启" : "数据关闭");
-            updateNotification(nm, msg);
-            if (s.optBoolean("wifiPaused")) nm.cancel(8);
-            packageWarnings(s.optJSONArray("directedWarnings"));
-            pendingPrompt(nm, s.optJSONObject("directedPending"));
-            try {
-              // Unsent alerts stay unmarked, so they appear once notifications are allowed.
-              if (nm.areNotificationsEnabled()) {
-                packageAlerts(nm, s.optJSONArray("directedAlerts"));
-                outsideAlerts(nm, s.optJSONObject("outsideAlerts"));
-              }
-            } catch (SecurityException ignored) {
-              /* Notification permission does not change guard health. */
-            }
-          } catch (Exception e) {
-            updateNotification(nm, "监控不可用，请打开应用检查 Root 授权");
-          }
-        },
-        0,
-        10,
-        TimeUnit.SECONDS);
+    arm(0);
+  }
+
+  void arm(long delay) {
+    if (worker.isShutdown()) return;
+    worker.schedule(this::beat, delay, TimeUnit.MILLISECONDS);
+  }
+
+  /** Screen-on cellular use stays near 10 seconds; idle or screen-off backs off. */
+  void beat() {
+    long next = 45_000;
+    boolean stop = false;
+    try {
+      NotificationManager nm = getSystemService(NotificationManager.class);
+      if (GuardApplication.off(this)) {
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        stopSelf();
+        stop = true;
+        return;
+      }
+      JSONObject s;
+      try {
+        s = RootClient.action("health");
+      } catch (Exception unavailable) {
+        RootClient.start(this);
+        s = RootClient.action("health");
+      }
+      GuardApplication.syncLock(s);
+      pauseOnWifi = s.optBoolean("pauseOnWifi", true);
+      String msg = s.optString("fault");
+      if (msg.isEmpty())
+        msg =
+            (s.optBoolean("wifiPaused") ? "Wi-Fi · 限制已暂停 · " : "")
+                + (s.optInt("activeSlot") > 0 ? "卡 " + s.optInt("activeSlot") : "暂无数据卡")
+                + " · "
+                + (s.optBoolean("dataOn") ? "数据开启" : "数据关闭");
+      updateNotification(nm, msg);
+      if (s.optBoolean("wifiPaused")) nm.cancel(8);
+      packageWarnings(s.optJSONArray("directedWarnings"));
+      pendingPrompt(nm, s.optJSONObject("directedPending"));
+      try {
+        // Unsent alerts stay unmarked, so they appear once notifications are allowed.
+        if (nm.areNotificationsEnabled()) {
+          packageAlerts(nm, s.optJSONArray("directedAlerts"));
+          outsideAlerts(nm, s.optJSONObject("outsideAlerts"));
+        }
+      } catch (SecurityException ignored) {
+        /* Notification permission does not change guard health. */
+      }
+      boolean interactive =
+          ((PowerManager) getSystemService(POWER_SERVICE)).isInteractive();
+      boolean busy = s.optBoolean("dataOn") && !s.optBoolean("wifiPaused");
+      next = interactive && busy ? 10_000 : 45_000;
+    } catch (Exception e) {
+      updateNotification(
+          getSystemService(NotificationManager.class), "监控不可用，请打开应用检查 Root 授权");
+    } finally {
+      if (!stop) arm(next);
+    }
   }
 
   void packageWarnings(JSONArray warnings) throws Exception {

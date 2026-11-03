@@ -31,6 +31,7 @@ public final class MainActivity extends Activity {
   int switching;
   boolean initialCard = true;
   long lastTouch;
+  long shownBudget = Long.MIN_VALUE;
   String logFilter = "all";
   int importSlot = 2;
   final Runnable poll =
@@ -43,7 +44,11 @@ public final class MainActivity extends Activity {
               && (pending
                   || (hasWindowFocus() && SystemClock.elapsedRealtime() - lastTouch > 2000)))
             load(false, true);
-          main.postDelayed(this, pending ? 2000 : 5000);
+          long used = status == null ? Long.MIN_VALUE : status.optLong("budgetUsed");
+          boolean moving = used != shownBudget;
+          shownBudget = used;
+          // Follow a download closely; an idle page does not keep parsing a full status.
+          main.postDelayed(this, pending ? 2000 : moving ? 3000 : 15000);
         }
       };
 
@@ -107,7 +112,7 @@ public final class MainActivity extends Activity {
     foreground = true;
     if (body != null) load(false, true);
     main.removeCallbacks(poll);
-    main.postDelayed(poll, 5000);
+    main.postDelayed(poll, 3000);
   }
 
   @Override
@@ -835,18 +840,6 @@ public final class MainActivity extends Activity {
     p.setBackground(ui.outlined(ui.soft, 24, ui.soft));
     p.setPadding(dp(18), dp(16), dp(18), dp(16));
     boolean manual = manualBalance(card, official);
-    LinearLayout top = new LinearLayout(this);
-    top.setGravity(Gravity.CENTER_VERTICAL);
-    top.addView(
-        ui.text(manual ? "通用剩余 · 手动设置" : "通用剩余", 13, ui.muted),
-        new LinearLayout.LayoutParams(0, -2, 1));
-    top.addView(
-        ui.chip(
-            official == null ? alias(card) + " · 待更新" : alias(card) + " · " + sourceLabel(official),
-            ui.accent,
-            ui.surface));
-    p.addView(top);
-    ui.space(p, 2);
     JSONObject local = card.optJSONObject("localSince");
     // The official figure less what this phone used since; the next official read replaces it.
     boolean live =
@@ -857,6 +850,28 @@ public final class MainActivity extends Activity {
             && general.optLong("remaining", -1) >= 0
             && local.optLong("baseRemaining", -2) == general.optLong("remaining", -1);
     long localGeneral = live ? local.optLong("general") : 0;
+    // The chip names the figure's own base: a later unchanged official read does not reset it.
+    boolean deducted = live && local.optLong("total") > 0;
+    LinearLayout top = new LinearLayout(this);
+    top.setGravity(Gravity.CENTER_VERTICAL);
+    top.addView(
+        ui.text(manual ? "通用剩余 · 手动设置" : deducted ? "通用剩余 · 实时估算" : "通用剩余", 13, ui.muted),
+        new LinearLayout.LayoutParams(0, -2, 1));
+    top.addView(
+        ui.chip(
+            official == null
+                ? alias(card) + " · 待更新"
+                : deducted
+                    ? alias(card)
+                        + " · 官方 "
+                        + new SimpleDateFormat("MM-dd HH:mm", Locale.ROOT)
+                            .format(new Date(local.optLong("asOf")))
+                        + " 起扣减"
+                    : alias(card) + " · " + sourceLabel(official),
+            ui.accent,
+            ui.surface));
+    p.addView(top);
+    ui.space(p, 2);
     p.addView(
         ui.heading(
             manual
@@ -890,7 +905,14 @@ public final class MainActivity extends Activity {
               + carrierBytes(local.optLong("general"))
               + " · 定向 "
               + carrierBytes(local.optLong("directed"))
-              + "），已实时扣减，下次官方同步以官方为准。");
+              + "），已实时扣减"
+              + (official.optLong("fetchedAt") - local.optLong("asOf") > 60000
+                  ? "；"
+                      + new SimpleDateFormat("HH:mm", Locale.ROOT)
+                          .format(new Date(official.optLong("fetchedAt")))
+                      + " 再次查询运营商数据未变化，继续按本机扣减"
+                  : "")
+              + "。下次官方数据更新后以官方为准。");
     thresholdRow(p, card);
     LinearLayout stats = new LinearLayout(this);
     stat(
@@ -902,7 +924,12 @@ public final class MainActivity extends Activity {
                 ? "暂无套餐"
                 : officialAmount(
                     directed.unknownRemaining() == directed.count() ? -1 : directed.remaining()));
-    stat(stats, "本期蜂窝用量", carrierBytes(card.optJSONObject("usage") == null ? -1 : card.optJSONObject("usage").optLong("raw", -1)));
+    long cellular = card.optLong("cellular", -1);
+    if (cellular < 0) {
+      JSONObject usage = card.optJSONObject("usage");
+      cellular = usage == null ? -1 : usage.optLong("raw", -1);
+    }
+    stat(stats, "本期蜂窝用量", carrierBytes(cellular));
     p.addView(stats);
     if (directed.unknownRemaining() > 0)
       note(p, "另有 " + directed.unknownRemaining() + " 个定向包未提供余额，不计入合计。");
@@ -1415,8 +1442,7 @@ public final class MainActivity extends Activity {
         "自动更新频率",
         "官方"
             + GuardDaemon.minutesLabel(config().optInt("scheduleMinutes", 10))
-            + " · 本机统计"
-            + GuardDaemon.minutesLabel(config().optInt("localSyncMinutes", 1)),
+            + " · 使用中约 10 秒",
         this::editSchedule);
   }
 
@@ -2065,7 +2091,7 @@ public final class MainActivity extends Activity {
           p,
           "通用估算以 "
               + time(baseline.optLong("asOf"))
-              + " 的官方通用已用为基准，追加此后的蜂窝增量：定向包绑定应用和命中规则的流量从定向扣减（不超过该包当时的剩余），来源不明的按通用扣减。下次官方查询成功后直接以官方为准。");
+              + " 的官方通用已用为基准，追加此后的蜂窝增量：定向包绑定应用和命中规则的流量从定向扣减（不超过该包当时的剩余），来源不明的按通用扣减。正在消耗时约 10 秒内更新，官方查询到新用量后直接覆盖。");
     else note(p, "尚无本账期通用校准，蜂窝总用量暂按通用保守计入。请更新本卡官方余量或手动校准通用已用。");
   }
 
@@ -3243,7 +3269,7 @@ public final class MainActivity extends Activity {
       presets(s.content, local, 1, 2, 5, 10);
       note(
           s.content,
-          "从手机系统的流量统计读取各卡和各应用用量：定向包应用或规则的流量从定向扣减，来源不明的一律按通用扣减。官方查询成功后直接以官方数据为准。");
+          "正在使用移动数据时，约 10 秒内从系统统计区分通用和定向，不等这个间隔。没有明显新流量时不读取统计，避免空耗电。官方查询到新的用量后，以官方数据覆盖这次估算。");
       s.primary(
               "保存",
               () -> {

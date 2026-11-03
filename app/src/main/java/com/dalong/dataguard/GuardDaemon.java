@@ -17,6 +17,7 @@ final class GuardDaemon {
   final GuardStore store;
   final int appUid;
   final Map<String, JSONObject> usage = new ConcurrentHashMap<>();
+  final Map<String, Long> unappliedDelta = new HashMap<>();
   volatile JSONArray cards = new JSONArray();
   volatile String fault = "", statsFault = "", receipt = "等待首次采样";
   volatile long sampleAt, statsAt, statsPolledAt, statsPolledCount;
@@ -27,6 +28,9 @@ final class GuardDaemon {
   boolean wifiConnected, wifiPaused, wifiStateKnown;
   final java.util.concurrent.atomic.AtomicBoolean networkTickQueued =
       new java.util.concurrent.atomic.AtomicBoolean();
+  final java.util.concurrent.atomic.AtomicBoolean statsRefreshQueued =
+      new java.util.concurrent.atomic.AtomicBoolean();
+  ExecutorService statsRefresh;
   long lastSave, lastAction, lastSwitchAt;
 
   GuardDaemon(int appUid) throws Exception {
@@ -127,6 +131,10 @@ final class GuardDaemon {
 
   void run() throws Exception {
     try (LocalServerSocket server = new LocalServerSocket(SOCKET)) {
+      statsPolledCount = store.data.optLong("budgetUsed");
+      statsPolledAt = System.currentTimeMillis();
+      statsRefresh = Executors.newSingleThreadExecutor();
+      statsRefresh.execute(() -> refreshUsage(true));
       ScheduledExecutorService control = Executors.newSingleThreadScheduledExecutor();
       control.scheduleWithFixedDelay(() -> tickSafe(), 0, 1, TimeUnit.SECONDS);
       try {
@@ -142,8 +150,6 @@ final class GuardDaemon {
       } catch (RuntimeException unavailable) {
         // The existing one-second control sample remains the bounded fallback.
       }
-      ScheduledExecutorService history = Executors.newSingleThreadScheduledExecutor();
-      history.scheduleWithFixedDelay(() -> refreshUsage(), 0, 30, TimeUnit.SECONDS);
       Executors.newSingleThreadScheduledExecutor()
           .scheduleWithFixedDelay(() -> OfficialClient.scheduled(this), 20, 60, TimeUnit.SECONDS);
       while (true) {
@@ -868,20 +874,27 @@ final class GuardDaemon {
     JSONObject config = store.config(), data = findCard(defaultSlot);
     JSONObject cc = data == null ? null : cardConfig(data);
     JSONObject currentUsage = data == null ? null : usage.get(data.getString("identity"));
-    if (activeSlot == defaultSlot && cc != null && currentUsage != null) {
+    if (activeSlot == defaultSlot && cc != null) {
+      String id = data.getString("identity");
+      long carried = Math.addExact(delta, unappliedDelta.getOrDefault(id, 0L));
       long cycle = UsageMath.carrierCycleStart(now, cc.optInt("cycleDay", 1));
       JSONObject previousUsage = cc.optJSONObject("protectedUsage");
       long protectedUsed =
-          UsageMath.conservativeUsed(
-              previousUsage == null ? -1 : previousUsage.optLong("used", -1),
-              previousUsage == null ? -1 : previousUsage.optLong("cycleStart", -1),
-              currentUsage.optLong("raw", -1),
-              currentUsage.optLong("cycleStart", -1),
-              cycle,
-              delta);
-      if (protectedUsed >= 0)
+          currentUsage == null
+              ? -1
+              : UsageMath.conservativeUsed(
+                  previousUsage == null ? -1 : previousUsage.optLong("used", -1),
+                  previousUsage == null ? -1 : previousUsage.optLong("cycleStart", -1),
+                  currentUsage.optLong("raw", -1),
+                  currentUsage.optLong("cycleStart", -1),
+                  cycle,
+                  carried);
+      // Until this card's history arrives (just after a restart, say), its traffic waits here.
+      if (protectedUsed >= 0) {
         cc.put(
             "protectedUsage", new JSONObject().put("cycleStart", cycle).put("used", protectedUsed));
+        unappliedDelta.remove(id);
+      } else if (carried > 0) unappliedDelta.put(id, carried);
     }
     long left = cc == null ? -1 : remaining(cc, currentUsage);
     long reserve = cc == null ? 500000000 : cc.optLong("reserve", 500000000);
@@ -943,12 +956,37 @@ final class GuardDaemon {
       }
     }
     fault = "";
-    // Persist every changed counter, including IMS while data is off. Idle heartbeats
-    // and timestamps need not rewrite the entire ledger every second.
-    if (delta > 0 || wasDataOn != dataOn || now - lastSave >= 30000) {
+    // The ledger is an fsync of the whole journal. Counters survive a restart from the kernel,
+    // so a download must not rewrite it every second; a data-state change still saves at once.
+    if (wasDataOn != dataOn || now - lastSave >= (delta > 0 ? 15000 : 60000)) {
       store.save();
       lastSave = now;
     }
+    requestStatsRefresh(now);
+  }
+
+  /** Folds per-app stats while cellular bytes are arriving, and not while the radio is idle. */
+  void requestStatsRefresh(long now) throws Exception {
+    if (statsRefresh == null) return;
+    long sincePoll = statsPolledAt <= 0 ? Long.MAX_VALUE / 4 : now - statsPolledAt;
+    long sinceRead = statsAt <= 0 ? Long.MAX_VALUE / 4 : now - statsAt;
+    StatsRefresh.Mode mode =
+        StatsRefresh.mode(
+            Math.max(0, store.data.optLong("budgetUsed") - statsPolledCount),
+            sincePoll,
+            localSyncMinutes(store.config()) * 60000L,
+            strict(),
+            sinceRead);
+    if (mode == StatsRefresh.Mode.SKIP || !statsRefreshQueued.compareAndSet(false, true)) return;
+    boolean poll = mode == StatsRefresh.Mode.POLL;
+    statsRefresh.execute(
+        () -> {
+          try {
+            refreshUsage(poll);
+          } finally {
+            statsRefreshQueued.set(false);
+          }
+        });
   }
 
   synchronized void stop(String reason) throws Exception {
@@ -984,24 +1022,25 @@ final class GuardDaemon {
   }
 
   void refreshUsage() {
+    refreshUsage(true);
+  }
+
+  void refreshUsage(boolean poll) {
     try {
       JSONArray list = platform.cards();
       long now = System.currentTimeMillis();
-      long every, counted;
-      synchronized (this) {
-        every = localSyncMinutes(store.config()) * 60000L;
-        counted = store.data.optLong("budgetUsed");
-      }
-      // Without a poll the system history only advances every few MB or half hour. Heavy use
-      // polls sooner, so directed apps' traffic leaves general within one refresh.
-      if (now - statsPolledAt >= every - 5000
-          || (counted - statsPolledCount >= 20_000_000 && now - statsPolledAt >= 25000)) {
-        statsPolledAt = now;
-        statsPolledCount = counted;
+      if (poll) {
+        long counted;
+        synchronized (this) {
+          // Claim the gap before the binder call so a one-second tick cannot pile polls.
+          statsPolledAt = now;
+          counted = store.data.optLong("budgetUsed");
+        }
         try {
           platform.pollStats();
+          statsPolledCount = counted;
         } catch (Exception pollUnavailable) {
-          // The history still advances on the system's own schedule.
+          // Pending bytes stay above the baseline, so the next gap retries.
         }
       }
       for (int i = 0; i < list.length(); i++) {
@@ -1769,6 +1808,8 @@ final class GuardDaemon {
       card.put("config", config)
           .put("usage", u == null ? new JSONObject() : u)
           .put("remaining", remaining(config, u));
+      long liveRaw = protectedRaw(config, u);
+      if (liveRaw >= 0) card.put("cellular", liveRaw);
       JSONObject snap = config.optJSONObject("calibration");
       long since = u == null || !based(snap, u) ? -1 : sinceBaseline(config, u, snap);
       if (since >= 0 && snap.optLong("cycleStart", -1) == DirectedPackages.cycle(config)) {
