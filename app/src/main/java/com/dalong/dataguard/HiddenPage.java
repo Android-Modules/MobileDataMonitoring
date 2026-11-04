@@ -216,7 +216,14 @@ final class HiddenPage {
         () -> cleanUp(daemon, self, 0, before, true));
   }
 
-  /** Unattended: one quiet attempt per card and interval, with SMS as the user-enabled backup. */
+  static boolean webSession(GuardDaemon daemon, String identity) {
+    synchronized (daemon) {
+      JSONObject card = daemon.store.data.optJSONObject("webCard");
+      return card != null && identity.equals(card.optString("identity"));
+    }
+  }
+
+  /** Unattended: web hall first, one immediate retry while the login remains, then SMS, then the app. */
   static void scheduled(GuardDaemon daemon) throws Exception {
     JSONArray due = new JSONArray();
     long now = System.currentTimeMillis();
@@ -259,37 +266,76 @@ final class HiddenPage {
       String id = item.getString("id");
       boolean done = false;
       try {
-        if (item.optBoolean("web")) done = web(daemon, id);
-        if (!done && item.has("route")) {
-          synchronized (daemon) {
-            OfficialClient.queryState(daemon, id, "waiting", "正在后台更新官方余量", now);
+        if (item.optBoolean("web")) {
+          int reads = com.dalong.dataguard.core.OfficialRoute.webReads(true);
+          for (int attempt = 0; attempt < reads && !done; attempt++) {
+            if (attempt > 0 && !webSession(daemon, id)) break;
+            try {
+              done = web(daemon, id);
+            } catch (Exception unsupported) {
+              done = false;
+            }
           }
-          done = read(daemon, id, item.getInt("user"), item.getJSONObject("route"));
         }
-      } catch (Exception unsupported) {
-        // Falls through to the SMS backup or the log line below.
       } finally {
         running.set(false);
       }
       if (done) continue;
-      synchronized (daemon) {
-        long at = System.currentTimeMillis();
-        if (item.optBoolean("sms")
-            && daemon.cardConfig(daemon.findCardByIdentity(id)).optBoolean("smsSync")) {
+      boolean webRemains = webSession(daemon, id);
+      com.dalong.dataguard.core.OfficialRoute.Step step =
+          com.dalong.dataguard.core.OfficialRoute.afterWeb(
+              webRemains, item.optBoolean("sms"), item.has("route"));
+      if (step == com.dalong.dataguard.core.OfficialRoute.Step.SMS) {
+        synchronized (daemon) {
+          long at = System.currentTimeMillis();
           JSONObject texted = daemon.store.data.optJSONObject("smsScheduledAt");
           if (texted == null) daemon.store.data.put("smsScheduledAt", texted = new JSONObject());
           texted.put(id, at);
           SmsSync.refresh(daemon, id);
+        }
+        continue;
+      }
+      if (step == com.dalong.dataguard.core.OfficialRoute.Step.APP && running.compareAndSet(false, true)) {
+        try {
+          synchronized (daemon) {
+            OfficialClient.queryState(daemon, id, "waiting", "网上营业厅不可用，正在读取江苏 App", now);
+          }
+          done = read(daemon, id, item.getInt("user"), item.getJSONObject("route"));
+        } catch (Exception unsupported) {
+          done = false;
+        } finally {
+          running.set(false);
+        }
+        if (done) continue;
+      }
+      synchronized (daemon) {
+        long at = System.currentTimeMillis();
+        if (webRemains) {
+          OfficialClient.queryState(
+              daemon,
+              id,
+              "error",
+              OfficialClient.slotLabel(daemon, id) + "网上营业厅连读两次都没有读到，登录仍在，下次仍先走网上营业厅",
+              at);
+          if (at - failureLoggedAt.getOrDefault(id, 0L) >= SMS_EVERY_MS) {
+            failureLoggedAt.put(id, at);
+            daemon.store.event(
+                "query",
+                "网上营业厅这次没有读到",
+                "登录仍有效，已立刻再读一次，仍没有结果，没有改用江苏 App。",
+                "");
+          }
         } else {
           OfficialClient.queryState(
               daemon,
               id,
               "error",
-              OfficialClient.slotLabel(daemon, id) + "后台更新未完成，请确认官方 App 已登录",
+              OfficialClient.slotLabel(daemon, id) + "后台更新未完成，请确认江苏 App 已登录或开启短信查询",
               at);
           if (at - failureLoggedAt.getOrDefault(id, 0L) >= SMS_EVERY_MS) {
             failureLoggedAt.put(id, at);
-            daemon.store.event("query", "移动后台更新未完成", "未读到本卡余量，可能需要在官方 App 重新登录，也可以开启短信查询。", "");
+            daemon.store.event(
+                "query", "移动后台更新未完成", "网上营业厅未登录。已尝试短信或江苏 App，仍未读到本卡余量。", "");
           }
         }
       }

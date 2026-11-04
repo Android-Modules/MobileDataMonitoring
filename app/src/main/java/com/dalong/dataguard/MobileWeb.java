@@ -59,7 +59,13 @@ final class MobileWeb {
         new WebViewClient() {
           @Override
           public void onPageFinished(WebView view, String url) {
-            if (loginPage(url)) finish.accept(null, "login");
+            // A live session can pass through the bind URL. Only a page that stays there is logged out.
+            if (!loginPage(url)) return;
+            main.postDelayed(
+                () -> {
+                  if (!ended[0] && loginPage(web.getUrl())) finish.accept(null, "login");
+                },
+                8000);
           }
         });
     poll[0] =

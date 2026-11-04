@@ -21,6 +21,17 @@ public class AccountingTest {
   }
 
   @Test
+  public void webHallStaysAheadOfSmsAndTheJiangsuApp() {
+    assertEquals(2, OfficialRoute.webReads(true));
+    assertEquals(0, OfficialRoute.webReads(false));
+    assertEquals(OfficialRoute.Step.NONE, OfficialRoute.afterWeb(true, false, true));
+    assertEquals(OfficialRoute.Step.SMS, OfficialRoute.afterWeb(true, true, true));
+    assertEquals(OfficialRoute.Step.SMS, OfficialRoute.afterWeb(false, true, true));
+    assertEquals(OfficialRoute.Step.APP, OfficialRoute.afterWeb(false, false, true));
+    assertEquals(OfficialRoute.Step.NONE, OfficialRoute.afterWeb(false, false, false));
+  }
+
+  @Test
   public void activeUseFoldsWithinTwentySecondsAndIdleDoesNotPoll() {
     long idle = 60_000;
     assertEquals(StatsRefresh.Mode.SKIP, StatsRefresh.mode(0, 3_600_000, idle, false, 3_600_000));

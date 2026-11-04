@@ -1757,6 +1757,7 @@ final class GuardDaemon {
         .put("activeSlot", activeSlot)
         .put("dataOn", dataOn)
         .put("sampleAt", sampleAt)
+        .put("budgetUsed", store.data.optLong("budgetUsed"))
         .put("blockedSubs", blockedSubs())
         .put("pauseOnWifi", store.config().optBoolean("pauseOnWifi", true))
         .put("scheduleMinutes", officialMinutes(store.config()))

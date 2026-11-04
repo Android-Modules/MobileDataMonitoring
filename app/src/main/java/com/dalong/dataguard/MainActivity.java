@@ -1275,8 +1275,8 @@ public final class MainActivity extends Activity {
       note(
           p,
           web
-              ? "优先走网上营业厅，不需要官方 App，熄屏也能定时更新；失效时改用"
-                  + (app ? "江苏 App 隐藏页或短信。" : "短信。")
+              ? "优先走网上营业厅，不需要官方 App，熄屏也能定时更新；登录还在但这次没读到，会立刻再读一次。登录失效后"
+                  + (app ? "先发短信，仍不行再用江苏 App。" : "改发短信。")
               : app
                   ? "江苏移动号码：在后台读取江苏 App 余量页，不影响屏幕。首次需在 App 点击流量进入余量查询一次。"
                   : regionNote(card));
@@ -1520,26 +1520,40 @@ public final class MainActivity extends Activity {
     }
   }
 
-  /** The web service hall first; a lapsed login or a silent page falls back to the app route. */
+  /** Web hall first. A miss while the login remains is read once more; only a real logout uses SMS, then the app. */
   void webRefresh(int target, String identity) {
     webReading = true;
     render();
     toast("正在通过网上营业厅查询");
+    readWeb(target, identity, true);
+  }
+
+  void readWeb(int target, String identity, boolean allowRetry) {
     MobileWeb.read(
         this,
         (page, error) -> {
+          if (page == null && allowRetry && !"login".equals(error)) {
+            toast("网上营业厅没有读到，再读一次");
+            readWeb(target, identity, false);
+            return;
+          }
           if (page == null) {
             webReading = false;
-            if ("login".equals(error)) {
-              MobileWeb.expire(this);
-              MobileWeb.lost(identity);
+            if (!"login".equals(error)) {
+              busy = false;
+              getPreferences(0).edit().remove("officialPending").apply();
+              toast("网上营业厅连读两次都没有响应，登录仍在");
+              render();
+              return;
             }
-            String next = jiangsuApp(cardFor(target)) ? "改用江苏 App 读取" : "尝试其他方式";
+            MobileWeb.expire(MainActivity.this);
+            MobileWeb.lost(identity);
+            JSONObject failed = cardFor(target);
+            JSONObject cfg = failed == null ? null : failed.optJSONObject("config");
             toast(
-                "login".equals(error)
-                    ? "网上营业厅登录已失效，" + next
-                    : "网上营业厅暂未响应，" + next);
-            // The web page just failed here; the worker goes straight to the next route.
+                cfg != null && cfg.optBoolean("smsSync")
+                    ? "网上营业厅登录已失效，改为发送查询短信"
+                    : "网上营业厅登录已失效，改为读取江苏 App");
             rootRefresh(target, identity, true, true);
             return;
           }
@@ -1623,7 +1637,7 @@ public final class MainActivity extends Activity {
           s.content,
           "stop",
           "退出登录",
-          "清除本机保存的登录状态，后台改用官方 App 或短信",
+          "清除本机保存的登录状态。之后先发短信，仍不行再用江苏 App",
           () -> {
             s.dismiss();
             android.webkit.CookieManager.getInstance().removeAllCookies(null);

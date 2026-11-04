@@ -456,7 +456,7 @@ final class OfficialClient {
     daemon.store.event(
         "query",
         "网上营业厅登录已失效",
-        "后台查询改用官方 App 隐藏页或短信。需要时在校准 → 网上营业厅重新登录。",
+        "登录失效后先发短信，仍读不到再用江苏 App。需要时在校准 → 网上营业厅重新登录。",
         "");
   }
 
@@ -691,11 +691,13 @@ final class OfficialClient {
         .start();
   }
 
-  /** Outside Jiangsu the Jiangsu app cannot sign in; the SMS query is the remaining route. */
+  /** Web hall first. After it is gone: a text, and only then the Jiangsu app. */
   static void appOrSms(GuardDaemon daemon, JSONObject card) throws Exception {
-    if (daemon.jiangsuApp(card)) openMobileApp(daemon, card, false);
-    else if (daemon.cardConfig(card).optBoolean("smsSync"))
+    if (daemon.cardConfig(card).optBoolean("smsSync")) {
       SmsSync.refresh(daemon, card.getString("identity"));
+      return;
+    }
+    if (daemon.jiangsuApp(card)) openMobileApp(daemon, card, false);
     else throw new IllegalArgumentException("本卡不是江苏移动号码，请登录网上营业厅，或发短信查询");
   }
 

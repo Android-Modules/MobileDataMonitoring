@@ -11,6 +11,7 @@ public final class GuardService extends Service {
   final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
   String lastNotification;
   String lastPending;
+  long seenBudget = -1;
   volatile boolean pauseOnWifi = true;
 
   final Handler main = new Handler(Looper.getMainLooper());
@@ -35,7 +36,7 @@ public final class GuardService extends Service {
     worker.schedule(this::beat, delay, TimeUnit.MILLISECONDS);
   }
 
-  /** Screen-on cellular use stays near 10 seconds; idle or screen-off backs off. */
+  /** Poll quickly only while cellular bytes are actually moving and the screen is on. */
   void beat() {
     long next = 45_000;
     boolean stop = false;
@@ -76,10 +77,14 @@ public final class GuardService extends Service {
       } catch (SecurityException ignored) {
         /* Notification permission does not change guard health. */
       }
-      boolean interactive =
-          ((PowerManager) getSystemService(POWER_SERVICE)).isInteractive();
-      boolean busy = s.optBoolean("dataOn") && !s.optBoolean("wifiPaused");
-      next = interactive && busy ? 10_000 : 45_000;
+      long used = s.optLong("budgetUsed", -1);
+      // A few kilobytes of radio noise must not keep the fast poll running.
+      boolean moving = used >= 0 && seenBudget >= 0 && used - seenBudget >= 64 * 1024;
+      if (used >= 0) seenBudget = used;
+      boolean interactive = ((PowerManager) getSystemService(POWER_SERVICE)).isInteractive();
+      boolean cellular = s.optBoolean("dataOn") && !s.optBoolean("wifiPaused");
+      // Data merely being on is not use. A quiet screen does not need a 10-second health poll.
+      next = interactive && cellular && moving ? 10_000 : 45_000;
     } catch (Exception e) {
       updateNotification(
           getSystemService(NotificationManager.class), "监控不可用，请打开应用检查 Root 授权");
