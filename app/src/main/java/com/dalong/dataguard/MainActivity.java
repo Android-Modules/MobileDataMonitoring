@@ -1298,6 +1298,12 @@ public final class MainActivity extends Activity {
                   ? "登录已失效，点此重新登录"
                   : "已登录 " + MobileWeb.prefs(this).getString("telephone", "") + " · 优先使用",
           () -> webSheet(card));
+      ui.row(
+          p,
+          "stop",
+          "清空网页数据",
+          "清除网上营业厅的 Cookie、缓存和登录状态",
+          () -> confirmClearWeb(card));
       scheduleRow(p);
       ui.row(p, "refresh", "发短信查询", "向 10086 发送 CXLL，不需要 App 登录", this::smsQuery);
       Switch auto =
@@ -1615,6 +1621,26 @@ public final class MainActivity extends Activity {
     }
   }
 
+  void confirmClearWeb(JSONObject card) {
+    if (webReading) {
+      toast("正在读取网上营业厅，完成后再清空");
+      return;
+    }
+    GuardUi.Sheet s =
+        ui.sheet("清空网页数据", "卡 " + card.optInt("slot") + " · 只清除本应用里的网上营业厅数据");
+    note(s.content, "会删除 Cookie、缓存和登录状态。已保存的官方余量还在。短信和江苏 App 不受影响，清空后需要重新登录。");
+    s.primary(
+            "清空",
+            () -> {
+              s.dismiss();
+              MobileWeb.clearAll(this);
+              toast("已清空网上营业厅数据");
+              render();
+            })
+        .secondary("取消", s::dismiss)
+        .show();
+  }
+
   void webSheet(JSONObject card) {
     try {
       String identity = card.getString("identity");
@@ -1640,11 +1666,7 @@ public final class MainActivity extends Activity {
           "清除本机保存的登录状态。之后先发短信，仍不行再用江苏 App",
           () -> {
             s.dismiss();
-            android.webkit.CookieManager.getInstance().removeAllCookies(null);
-            android.webkit.CookieManager.getInstance().flush();
-            android.webkit.WebStorage.getInstance().deleteAllData();
-            MobileWeb.prefs(this).edit().clear().apply();
-            MobileWeb.lost(identity);
+            MobileWeb.clearAll(this);
             toast("已退出网上营业厅");
             render();
           });

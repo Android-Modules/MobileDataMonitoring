@@ -122,6 +122,34 @@ final class MobileWeb {
     prefs(c).edit().putBoolean("expired", true).apply();
   }
 
+  /**
+   * Drops every cookie, cache and saved login this app keeps for the web hall. Cookie removal is
+   * asynchronous; flushing first would write the old cookies back.
+   */
+  static void clearAll(Context context) {
+    String previous = identity(context);
+    CookieManager cookies = CookieManager.getInstance();
+    cookies.removeAllCookies(
+        done ->
+            new Thread(
+                    () -> {
+                      try {
+                        CookieManager.getInstance().flush();
+                      } catch (RuntimeException ignored) {
+                      }
+                    },
+                    "mobile-web-clear")
+                .start());
+    WebStorage.getInstance().deleteAllData();
+    WebView web = new WebView(context.getApplicationContext());
+    web.clearCache(true);
+    web.clearHistory();
+    web.clearFormData();
+    web.destroy();
+    prefs(context).edit().clear().commit();
+    if (!previous.isEmpty()) lost(previous);
+  }
+
   /** Tells the root worker the session has ended, so its schedule stops relying on it. */
   static void lost(String identity) {
     new Thread(
