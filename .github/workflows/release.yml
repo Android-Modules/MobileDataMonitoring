@@ -1,0 +1,110 @@
+name: Android release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.9.13)"
+        required: true
+        type: string
+      build_run:
+        description: "Successful tag build run ID"
+        required: true
+        type: string
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-37.0" "build-tools;36.1.0"
+      - name: Test, lint and assemble unsigned release
+        run: sh ./gradlew :core:test :app:lintRelease :app:assembleRelease -PciUnsignedRelease=true --no-daemon --console=plain
+      - name: Check tag matches APK version
+        run: |
+          apk_dir=app/build/outputs/apk/release
+          test "v$(jq -er '.elements[0].versionName' "$apk_dir/output-metadata.json")" = "$GITHUB_REF_NAME"
+          test "$(jq -er '.elements[0].outputFile' "$apk_dir/output-metadata.json")" = app-release-unsigned.apk
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: unsigned-release
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    concurrency:
+      group: release-${{ inputs.tag }}
+    env:
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
+      BUILD_RUN: ${{ inputs.build_run }}
+      RELEASE_CERT_SHA256: 595fe57a6609b65193e2f04dac76042225295f704947cd1b3f08d56624c23773
+    steps:
+      - name: Download the successful tag build and draft assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$BUILD_RUN" =~ ^[0-9]+$ ]]
+          commit=$(gh api "repos/$GH_REPO/commits/$TAG" --jq '.sha')
+          workflow=$(gh api "repos/$GH_REPO/actions/workflows/release.yml" --jq '.id')
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" |
+            jq -e --arg commit "$commit" --arg tag "$TAG" --argjson workflow "$workflow" \
+              '.workflow_id == $workflow and .head_sha == $commit and .head_branch == $tag
+                and .event == "push" and .conclusion == "success"' > /dev/null
+          asset="MobileDataGuard-${TAG#v}-release.apk"
+          gh release view "$TAG" --json isDraft,isPrerelease,assets |
+            jq -e --arg apk "$asset" --arg sum "$asset.sha256" \
+              '.isDraft and (.isPrerelease | not) and ([.assets[].name] | sort) == ([$apk, $sum] | sort)' > /dev/null
+          gh run download "$BUILD_RUN" --name unsigned-release --dir unsigned
+          gh release download "$TAG" --pattern "$asset" --pattern "$asset.sha256" --dir signed
+      - name: Verify production signature and APK contents
+        run: |
+          sdkmanager "build-tools;36.1.0"
+          asset="MobileDataGuard-${TAG#v}-release.apk"
+          cd signed
+          test "$(cat "$asset.sha256")" = "$(sha256sum "$asset")"
+          cert=$("$ANDROID_HOME/build-tools/36.1.0/apksigner" verify --print-certs "$asset")
+          test "$(awk '/^Signer #[0-9]+ certificate SHA-256 digest:/ { print $NF }' <<< "$cert")" = "$RELEASE_CERT_SHA256"
+          python3 - "../unsigned/app-release-unsigned.apk" "$asset" <<'PY'
+          import sys
+          from zipfile import ZipFile
+
+          with ZipFile(sys.argv[1]) as unsigned, ZipFile(sys.argv[2]) as signed:
+              names = sorted(unsigned.namelist())
+              if len(set(names)) != len(names) or names != sorted(signed.namelist()):
+                  sys.exit("Signed APK entries differ from the tag build")
+              for name in names:
+                  if unsigned.read(name) != signed.read(name):
+                      sys.exit(f"Signed APK content differs: {name}")
+          PY
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$TAG" --draft=false --latest --verify-tag

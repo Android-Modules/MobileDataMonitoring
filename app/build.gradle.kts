@@ -5,6 +5,7 @@ val releaseSigningFile = rootProject.file(".private/release-signing.properties")
 val releaseSigning = Properties().apply {
     if (releaseSigningFile.isFile) releaseSigningFile.inputStream().use { load(it) }
 }
+val ciUnsignedRelease = providers.gradleProperty("ciUnsignedRelease").map { it == "true" }.orElse(false)
 android {
     namespace = "com.dalong.dataguard"
     compileSdk { version = release(37) }
@@ -30,7 +31,7 @@ android {
 }
 tasks.matching { it.name == "packageRelease" }.configureEach {
     doFirst {
-        check(releaseSigningFile.isFile) {
+        check(releaseSigningFile.isFile || ciUnsignedRelease.get()) {
             "生产签名未配置：请提供 .private/release-signing.properties，不允许退回调试签名。"
         }
     }
