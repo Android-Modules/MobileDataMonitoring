@@ -76,12 +76,13 @@ sh ./gradlew :core:test :app:lintRelease :app:assembleRelease
 
 ## 发布流程
 
-1. 确认版本名与版本号后，在主分支提交上推送对应的 `v<版本名>` 标签。「Android release」工作流运行 core 测试、Release Lint 并上传 `unsigned-release` 构建产物。也可在主分支手动运行工作流，只填写标签，重新构建该标签。
-2. 下载该构建产物，在本机用生产密钥及 `apksigner sign --v1-signing-enabled false` 签名，生成 `MobileDataGuard-<版本名>-release.apk`，并在同目录生成包含 APK 文件名的 SHA-256 校验文件。将两个文件上传到该标签的 GitHub Release 草稿。生产密钥只保存在本机。
-3. 从主分支手动运行「Android release」，填写标签及构建 run ID。工作流核对标签对应的成功构建、APK 内容、生产证书和 SHA-256 后发布草稿。
-
-如需从终端触发最后一步，可在上传草稿附件后运行：
+更新 `app/build.gradle.kts` 中的 `versionName` 和 `versionCode`，先把版本提交推送到 `main`，再推送与 `versionName` 一致的标签。以下以 `0.9.14` 为例：
 
 ```sh
-gh workflow run release.yml --ref main -f tag="$tag" -f build_run="$build_run"
+git tag -a v0.9.14 -m "流量守卫 0.9.14"
+git push origin refs/tags/v0.9.14
 ```
+
+Actions 会运行 core 测试、Release Lint 和生产构建，随后使用现有生产签名签署 APK。签名证书校验通过后自动发布到 Releases，并附上 APK 和 SHA-256 校验文件。进度可在 Actions 的「Android release build」和「Android release publish」中查看。
+
+签名凭据由仓库的 `production-release` 环境提供，该环境仅允许 `main` 使用。发布工作流从 `main` 运行，并核对标签对应的提交与构建产物一致。

@@ -1,0 +1,118 @@
+name: Android release publish
+
+on:
+  workflow_run:
+    workflows: ["Android release build"]
+    types: [completed]
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-release
+    permissions:
+      actions: read
+      contents: write
+    concurrency:
+      group: android-release-${{ github.event.workflow_run.head_sha }}
+    env:
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: ${{ github.event.workflow_run.id }}
+      BUILD_SHA: ${{ github.event.workflow_run.head_sha }}
+      RELEASE_CERT_SHA256: 595fe57a6609b65193e2f04dac76042225295f704947cd1b3f08d56624c23773
+    steps:
+      - name: Verify tag and download its build
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          workflow=$(gh api "repos/$GH_REPO/actions/workflows/release.yml" --jq '.id')
+          test "$(jq -r '.workflow_run.workflow_id' "$GITHUB_EVENT_PATH")" = "$workflow"
+          [[ "$BUILD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/$GH_REPO/compare/$BUILD_SHA...main" |
+            jq -e '.behind_by == 0' > /dev/null
+          gh run download "$BUILD_RUN" --name unsigned-release --dir unsigned
+
+          tag=$(cat unsigned/source-tag.txt)
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          commit=$(gh api "repos/$GH_REPO/commits/$tag" --jq '.sha')
+          test "$commit" = "$BUILD_SHA"
+          test "$(cat unsigned/source-commit.txt)" = "$commit"
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+
+          if [[ "$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null)" == false ]]; then
+            echo "Release $tag is already published."
+            echo 'published=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+        if: steps.build.outputs.published != 'true'
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        if: steps.build.outputs.published != 'true'
+        with:
+          packages: "build-tools;36.1.0"
+      - name: Sign APK and verify production certificate
+        if: steps.build.outputs.published != 'true'
+        env:
+          TAG: ${{ steps.build.outputs.tag }}
+          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$RELEASE_KEYSTORE_B64" || -z "$RELEASE_STORE_PASSWORD" ||
+                -z "$RELEASE_KEY_ALIAS" || -z "$RELEASE_KEY_PASSWORD" ]]; then
+            echo "::error::The production-release environment is missing signing secrets."
+            exit 1
+          fi
+          umask 077
+          keystore=$(mktemp "$RUNNER_TEMP/release-key.XXXXXXXX")
+          trap 'rm -f -- "$keystore"' EXIT
+          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+
+          tools="$ANDROID_HOME/build-tools/36.1.0"
+          apk="MobileDataGuard-${TAG#v}-release.apk"
+          mkdir -p signed
+          "$tools/apksigner" sign --ks "$keystore" --ks-type PKCS12 \
+            --ks-key-alias "$RELEASE_KEY_ALIAS" \
+            --ks-pass env:RELEASE_STORE_PASSWORD --key-pass env:RELEASE_KEY_PASSWORD \
+            --v1-signing-enabled false --v4-signing-enabled false \
+            --out "signed/$apk" unsigned/app-release-unsigned.apk
+          cd signed
+          cert=$("$tools/apksigner" verify --print-certs "$apk")
+          actual=$(awk '/^Signer #[0-9]+ certificate SHA-256 digest:/ { print $NF }' <<< "$cert")
+          if [[ "$actual" != "$RELEASE_CERT_SHA256" ]]; then
+            echo "::error::APK signer does not match the existing production certificate."
+            exit 1
+          fi
+          "$tools/zipalign" -c -P 16 4 "$apk"
+          sha256sum "$apk" > "$apk.sha256"
+      - name: Publish APK and checksum
+        if: steps.build.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.build.outputs.tag }}
+        run: |
+          test "$(gh api "repos/$GH_REPO/commits/$TAG" --jq '.sha')" = "$BUILD_SHA"
+          apk="MobileDataGuard-${TAG#v}-release.apk"
+          if draft=$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null); then
+            if [[ "$draft" == true ]]; then
+              gh release upload "$TAG" "signed/$apk" "signed/$apk.sha256" --clobber
+              gh release edit "$TAG" --draft=false --verify-tag
+            fi
+          else
+            gh release create "$TAG" "signed/$apk" "signed/$apk.sha256" \
+              --verify-tag --generate-notes --title "流量守卫 ${TAG#v}"
+          fi
