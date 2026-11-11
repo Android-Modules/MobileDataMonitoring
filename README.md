@@ -76,7 +76,7 @@ sh ./gradlew :core:test :app:lintRelease :app:assembleRelease
 
 ## 发布流程
 
-1. 确认版本名与版本号后，在主分支提交上推送对应的 `v<版本名>` 标签。「Android release」工作流运行 core 测试、Release Lint 并上传 `unsigned-release` 构建产物。
+1. 确认版本名与版本号后，在主分支提交上推送对应的 `v<版本名>` 标签。「Android release」工作流运行 core 测试、Release Lint 并上传 `unsigned-release` 构建产物。也可在主分支手动运行工作流，只填写标签，重新构建该标签。
 2. 下载该构建产物，在本机用生产密钥及 `apksigner sign --v1-signing-enabled false` 签名，生成 `MobileDataGuard-<版本名>-release.apk`，并在同目录生成包含 APK 文件名的 SHA-256 校验文件。将两个文件上传到该标签的 GitHub Release 草稿。生产密钥只保存在本机。
 3. 从主分支手动运行「Android release」，填写标签及构建 run ID。工作流核对标签对应的成功构建、APK 内容、生产证书和 SHA-256 后发布草稿。
 
