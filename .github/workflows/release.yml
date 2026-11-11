@@ -40,8 +40,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - name: Install Android SDK
-        run: sdkmanager "platforms;android-37.0" "build-tools;36.1.0"
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: "platforms;android-37.0 build-tools;36.1.0"
       - name: Test, lint and assemble unsigned release
         run: sh ./gradlew :core:test :app:lintRelease :app:assembleRelease -PciUnsignedRelease=true --no-daemon --console=plain
       - name: Check version and prepare unsigned artifact
@@ -93,9 +94,15 @@ jobs:
           gh run download "$BUILD_RUN" --name unsigned-release --dir unsigned
           test "$(cat unsigned/source-commit.txt)" = "$commit"
           gh release download "$TAG" --pattern "$asset" --pattern "$asset.sha256" --dir signed
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: "build-tools;36.1.0"
       - name: Verify production signature and APK contents
         run: |
-          sdkmanager "build-tools;36.1.0"
           asset="MobileDataGuard-${TAG#v}-release.apk"
           cd signed
           test "$(cat "$asset.sha256")" = "$(sha256sum "$asset")"
