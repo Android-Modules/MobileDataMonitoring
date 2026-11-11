@@ -9,7 +9,7 @@ val ciUnsignedRelease = providers.gradleProperty("ciUnsignedRelease").map { it =
 android {
     namespace = "com.dalong.dataguard"
     compileSdk { version = release(37) }
-    defaultConfig { applicationId = "com.dalong.dataguard"; minSdk = 34; targetSdk = 35; versionCode = 50; versionName = "0.9.13" }
+    defaultConfig { applicationId = "com.dalong.dataguard"; minSdk = 34; targetSdk = 35; versionCode = 51; versionName = "0.9.14" }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     buildFeatures { buildConfig = true }
     packaging { resources.excludes += setOf("META-INF/LICENSE*", "META-INF/NOTICE*") }
