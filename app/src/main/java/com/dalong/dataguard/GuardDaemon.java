@@ -152,6 +152,23 @@ final class GuardDaemon {
       }
       Executors.newSingleThreadScheduledExecutor()
           .scheduleWithFixedDelay(() -> OfficialClient.scheduled(this), 20, 60, TimeUnit.SECONDS);
+      // An app update deletes the APK this worker was loaded from; the supervisor starts the new one.
+      String code = System.getProperty("java.class.path", "");
+      Executors.newSingleThreadScheduledExecutor()
+          .scheduleWithFixedDelay(
+              () -> {
+                if (code.isEmpty() || new java.io.File(code).exists()) return;
+                synchronized (this) {
+                  try {
+                    store.save();
+                  } catch (Exception ignored) {
+                  }
+                  Runtime.getRuntime().halt(0);
+                }
+              },
+              30,
+              30,
+              TimeUnit.SECONDS);
       while (true) {
         LocalSocket socket = server.accept();
         new Thread(() -> serve(socket), "guard-client").start();
@@ -1767,7 +1784,8 @@ final class GuardDaemon {
         .put("directedWarnings", store.data.optJSONArray("directedWarnings"))
         .put("directedPending", store.data.optJSONObject("directedPending"))
         .put("directedAlerts", store.data.optJSONArray("directedAlerts"))
-        .put("outsideAlerts", store.data.optJSONObject("outsideAlerts"));
+        .put("outsideAlerts", store.data.optJSONObject("outsideAlerts"))
+        .put("logins", Logins.all(this));
   }
 
   /** The SIM's own number first, then a number the user bound, then the ICCID. */
@@ -1856,6 +1874,7 @@ final class GuardDaemon {
         .put("officialResults", OfficialClient.associated(this))
         .put("officialByCard", OfficialClient.byCard(this))
         .put("officialQueries", store.data.optJSONObject("officialQueries"))
+        .put("logins", Logins.all(this))
         .put("directedBalances", DirectedPackages.all(this))
         .put("directedWarnings", store.data.optJSONArray("directedWarnings"))
         .put("directedPending", store.data.optJSONObject("directedPending"))

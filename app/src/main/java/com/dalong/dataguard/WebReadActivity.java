@@ -14,7 +14,7 @@ public final class WebReadActivity extends Activity {
     super.onCreate(state);
     String identity = getIntent().getStringExtra("identity");
     if (identity == null || !MobileWeb.usable(this, identity)) {
-      if (identity != null) MobileWeb.lost(identity);
+      if (identity != null) MobileWeb.lost(identity, false);
       finish();
       return;
     }
@@ -26,7 +26,7 @@ public final class WebReadActivity extends Activity {
           if (page == null) {
             if ("login".equals(error)) {
               MobileWeb.expire(this);
-              MobileWeb.lost(identity);
+              MobileWeb.lost(identity, false);
             }
             finish();
             return;
@@ -34,8 +34,9 @@ public final class WebReadActivity extends Activity {
           new Thread(
                   () -> {
                     try {
-                      MobileWeb.submit(identity, page);
-                      MobileWeb.remember(this, identity, page.optString("telephone"));
+                      long login = MobileWeb.loginAt(this, identity);
+                      MobileWeb.submit(identity, page, login);
+                      MobileWeb.remember(this, identity, page.optString("telephone"), login);
                     } catch (Exception ignored) {
                       // The worker falls back to the official app or SMS on its own.
                     }

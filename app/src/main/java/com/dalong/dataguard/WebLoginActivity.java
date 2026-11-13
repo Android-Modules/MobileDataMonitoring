@@ -19,7 +19,8 @@ public final class WebLoginActivity extends Activity {
   TextView hint;
   String identity;
   int slot;
-  boolean submitting, done;
+  /** The login form was shown, so the session read afterwards is a new one. */
+  boolean submitting, done, codeLogin;
 
   @Override
   public void onCreate(Bundle state) {
@@ -59,6 +60,7 @@ public final class WebLoginActivity extends Activity {
                 "document.body&&document.body.innerText.indexOf('已成功登录')>=0",
                 signedIn -> {
                   if ("true".equals(signedIn)) view.loadUrl(MobileWeb.HOME);
+                  else codeLogin = true;
                 });
           }
 
@@ -96,10 +98,11 @@ public final class WebLoginActivity extends Activity {
   void submit(JSONObject page) {
     submitting = true;
     hint.setText("已登录，正在核对号码并更新卡 " + slot + " 的余量…");
+    long login = codeLogin ? System.currentTimeMillis() : MobileWeb.loginAt(this, identity);
     io.execute(() -> {
       try {
-        MobileWeb.submit(identity, page);
-        MobileWeb.remember(this, identity, page.optString("telephone"));
+        MobileWeb.submit(identity, page, login);
+        MobileWeb.remember(this, identity, page.optString("telephone"), login);
         main.post(() -> {
           done = true;
           Toast.makeText(this, "卡 " + slot + " 已通过网上营业厅更新余量", Toast.LENGTH_LONG).show();

@@ -108,13 +108,19 @@ final class MobileWeb {
         && !prefs(c).getBoolean("expired", false);
   }
 
-  static void remember(Context c, String identity, String telephone) {
+  /** When the user signed in with a code; 0 for a login made before this was kept. */
+  static long loginAt(Context c, String identity) {
+    return identity.equals(identity(c)) ? prefs(c).getLong("loginAt", 0) : 0;
+  }
+
+  static void remember(Context c, String identity, String telephone, long loginAt) {
     prefs(c)
         .edit()
         .putString("identity", identity)
         .putString("telephone", telephone)
         .putBoolean("expired", false)
         .putLong("at", System.currentTimeMillis())
+        .putLong("loginAt", loginAt)
         .apply();
   }
 
@@ -147,16 +153,22 @@ final class MobileWeb {
     web.clearFormData();
     web.destroy();
     prefs(context).edit().clear().commit();
-    if (!previous.isEmpty()) lost(previous);
+    if (!previous.isEmpty()) lost(previous, true);
   }
 
-  /** Tells the root worker the session has ended, so its schedule stops relying on it. */
-  static void lost(String identity) {
+  /**
+   * Tells the root worker the session has ended, so its schedule stops relying on it. A login the
+   * user cleared is not an expiry.
+   */
+  static void lost(String identity, boolean cleared) {
     new Thread(
             () -> {
               try {
                 RootClient.request(
-                    new JSONObject().put("action", "mobileWebLost").put("identity", identity));
+                    new JSONObject()
+                        .put("action", "mobileWebLost")
+                        .put("identity", identity)
+                        .put("cleared", cleared));
               } catch (Exception ignored) {
               }
             },
@@ -165,11 +177,12 @@ final class MobileWeb {
   }
 
   /** Hands the page's figures to the root worker, which checks the number before using them. */
-  static JSONObject submit(String identity, JSONObject page) throws Exception {
+  static JSONObject submit(String identity, JSONObject page, long loginAt) throws Exception {
     return RootClient.request(
         new JSONObject()
             .put("action", "mobileWeb")
             .put("identity", identity)
+            .put("loginAt", loginAt)
             .put("telephone", page.optString("telephone"))
             .put("oprTime", page.optString("oprTime"))
             .put("flow", page.getJSONObject("flow")));

@@ -1269,6 +1269,16 @@ public final class MainActivity extends Activity {
           card.optString("numberKey").isEmpty()
               ? "完善本卡号码后，可核对并显示本卡官方余量。"
               : "暂无与本卡号码一致的官方余量。请在官方 App 使用该号码登录。");
+    JSONArray logins = status.optJSONArray("logins");
+    for (int i = 0; logins != null && i < logins.length(); i++) {
+      JSONObject l = logins.getJSONObject(i);
+      if (!card.getString("identity").equals(l.optString("identity"))) continue;
+      p.addView(
+          ui.text(
+              l.optString("label") + " · " + l.optString("text"),
+              12,
+              l.optLong("lostAt") > 0 || l.optBoolean("near") ? ui.warn : ui.muted));
+    }
     if (source.equals("mobile")) {
       boolean app = jiangsuApp(card), web = MobileWeb.usable(this, card.getString("identity"));
       officialButton(p);
@@ -1553,7 +1563,7 @@ public final class MainActivity extends Activity {
               return;
             }
             MobileWeb.expire(MainActivity.this);
-            MobileWeb.lost(identity);
+            MobileWeb.lost(identity, false);
             JSONObject failed = cardFor(target);
             JSONObject cfg = failed == null ? null : failed.optJSONObject("config");
             toast(
@@ -1565,8 +1575,9 @@ public final class MainActivity extends Activity {
           }
           io.execute(() -> {
             try {
-              MobileWeb.submit(identity, page);
-              MobileWeb.remember(this, identity, page.optString("telephone"));
+              long login = MobileWeb.loginAt(this, identity);
+              MobileWeb.submit(identity, page, login);
+              MobileWeb.remember(this, identity, page.optString("telephone"), login);
               main.post(() -> {
                 webReading = false;
                 busy = false;

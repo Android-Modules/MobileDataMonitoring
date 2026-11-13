@@ -104,7 +104,19 @@ final class OfficialClient {
                         "query", "联通账号未关联", "联通 App 登录的号码与本机 SIM 不一致，未保存连接。", "");
                     return;
                   }
-                  saveProfile(profile.put("accountKey", result.getString("accountKey")));
+                  // A token the app has replaced is a new login; the same one seen again is not.
+                  String key = result.getString("accountKey"), token = cookie(cookie, "ecs_token");
+                  boolean renewed = true;
+                  JSONArray saved = load();
+                  for (int i = 0; i < saved.length(); i++) {
+                    JSONObject old = saved.getJSONObject(i);
+                    if (key.equals(old.optString("accountKey")))
+                      renewed =
+                          !token.equals(
+                              cookie(old.getJSONObject("headers").optString("Cookie"), "ecs_token"));
+                  }
+                  Logins.ok(daemon, bound, Logins.UNICOM, renewed ? System.currentTimeMillis() : 0);
+                  saveProfile(profile.put("accountKey", key));
                   // Page navigation repeats the login; only a changed balance is worth a line.
                   JSONObject previous = byCard(daemon).optJSONObject(bound);
                   boolean changed =
@@ -137,6 +149,14 @@ final class OfficialClient {
             },
             "official-session")
         .start();
+  }
+
+  static String cookie(String header, String name) {
+    for (String pair : header.split(";")) {
+      String[] part = pair.trim().split("=", 2);
+      if (part.length == 2 && part[0].equals(name)) return part[1];
+    }
+    return "";
   }
 
   static boolean hasProfile(GuardDaemon daemon, String identity) throws Exception {
@@ -192,6 +212,7 @@ final class OfficialClient {
 
   static void refresh(GuardDaemon daemon, String expectedIdentity) throws Exception {
     JSONArray profiles = load(), list = new JSONArray();
+    List<String> owners = new ArrayList<>();
     synchronized (daemon) {
       JSONObject accounts = daemon.store.data.optJSONObject("officialAccounts");
       for (int i = 0; i < profiles.length(); i++) {
@@ -203,7 +224,10 @@ final class OfficialClient {
         String bound = snapshot == null ? "" : boundIdentity(daemon, snapshot, "unicom");
         if (profile.optBoolean("enabled")
             && !bound.isEmpty()
-            && (expectedIdentity.isEmpty() || expectedIdentity.equals(bound))) list.put(profile);
+            && (expectedIdentity.isEmpty() || expectedIdentity.equals(bound))) {
+          list.put(profile);
+          owners.add(bound);
+        }
       }
     }
     if (list.length() == 0) throw new IllegalArgumentException("请在官方 App 使用本卡号码登录；当前没有已关联的查询账号");
@@ -213,6 +237,7 @@ final class OfficialClient {
         queryState(
             daemon, expectedIdentity, "waiting", "正在查询本卡官方余量", System.currentTimeMillis());
       }
+    String[] querying = {""};
     new Thread(
             () -> {
               try {
@@ -228,6 +253,7 @@ final class OfficialClient {
                 for (int i = 0; i < list.length(); i++) {
                   JSONObject p = list.getJSONObject(i);
                   if (!p.optBoolean("enabled")) continue;
+                  querying[0] = owners.get(i);
                   JSONObject result;
                   try {
                     result = query(p);
@@ -243,6 +269,7 @@ final class OfficialClient {
                         || (!expectedIdentity.isEmpty() && !expectedIdentity.equals(bound)))
                       throw new SecurityException("官方登录号码未与本卡对应，未应用查询结果");
                     remember(daemon, p.getString("id"), result);
+                    Logins.ok(daemon, bound, Logins.UNICOM, 0);
                     daemon.store.data.put("officialError", "");
                     queryState(
                         daemon,
@@ -256,6 +283,11 @@ final class OfficialClient {
               } catch (Throwable e) {
                 try {
                   synchronized (daemon) {
+                    // Only the login page in place of the balance ends a login; errors do not.
+                    if (e instanceof IllegalArgumentException
+                        && !querying[0].isEmpty()
+                        && GuardDaemon.safeMessage(e).contains("登录态失效"))
+                      Logins.lost(daemon, querying[0], Logins.UNICOM);
                     daemon.store.data.put("officialError", GuardDaemon.safeMessage(e));
                     if (!expectedIdentity.isEmpty())
                       queryState(
@@ -385,6 +417,9 @@ final class OfficialClient {
       }
       queryState(daemon, identity, "updated", updatedText(daemon, identity, parsed), at);
       daemon.store.data.put("officialError", "");
+      // The app cannot read the page again after showing its login screen without a new sign-in.
+      var app = Logins.get(daemon, identity, Logins.APP);
+      Logins.ok(daemon, identity, Logins.APP, app != null && app.lostAt() > 0 ? now : 0);
     }
     remember(daemon, "mobile", parsed);
     if (requested
@@ -437,15 +472,30 @@ final class OfficialClient {
             List.of()),
         "web");
     // From now on this card's unattended updates go through the web service hall first.
+    // The web hall holds one number at a time; another card's web login has been replaced.
+    for (int i = 0; i < daemon.cards.length(); i++) {
+      String id = daemon.cards.getJSONObject(i).getString("identity");
+      if (!id.equals(card.getString("identity"))) Logins.forget(daemon, id, Logins.WEB);
+    }
     daemon
         .store
         .data
         .put("webCard", new JSONObject().put("identity", card.getString("identity")).put("at", now));
+    Logins.ok(daemon, card.getString("identity"), Logins.WEB, r.optLong("loginAt"));
   }
 
   static void mobileWebLost(GuardDaemon daemon, JSONObject r) throws Exception {
+    String id = r.optString("identity");
     JSONObject card = daemon.store.data.optJSONObject("webCard");
-    if (card == null || !card.optString("identity").equals(r.optString("identity"))) return;
+    boolean current = card != null && card.optString("identity").equals(id);
+    // Signing out on purpose is not an expiry: nothing is learned and nothing is reported.
+    if (r.optBoolean("cleared")) {
+      Logins.forget(daemon, id, Logins.WEB);
+      if (current) daemon.store.data.remove("webCard");
+      return;
+    }
+    if (current || Logins.get(daemon, id, Logins.WEB) != null) Logins.lost(daemon, id, Logins.WEB);
+    if (!current) return;
     daemon.store.data.remove("webCard");
     queryState(
         daemon,

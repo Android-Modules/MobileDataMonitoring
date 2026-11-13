@@ -116,13 +116,17 @@ final class HiddenPage {
     }
     Set<Integer> before = tasks;
     boolean keepRunning = wasRunning;
-    return onDisplay(
-        daemon,
-        identity,
-        LOAD_MS,
-        d -> daemon.platform.openMobile(user, route, d),
-        since -> loginAt >= since,
-        () -> cleanUp(daemon, Platform.MOBILE_APP, user, before, keepRunning));
+    long started = System.currentTimeMillis();
+    boolean done =
+        onDisplay(
+            daemon,
+            identity,
+            LOAD_MS,
+            d -> daemon.platform.openMobile(user, route, d),
+            since -> loginAt >= since,
+            () -> cleanUp(daemon, Platform.MOBILE_APP, user, before, keepRunning));
+    if (!done && loginAt >= started) Logins.lost(daemon, identity, Logins.APP);
+    return done;
   }
 
   /**

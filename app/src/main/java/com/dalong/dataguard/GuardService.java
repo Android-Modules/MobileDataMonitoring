@@ -27,7 +27,9 @@ public final class GuardService extends Service {
         new NotificationChannel("directed", "定向流量用尽提醒", NotificationManager.IMPORTANCE_HIGH));
     nm.createNotificationChannel(
         new NotificationChannel("outside", "套外流量提醒", NotificationManager.IMPORTANCE_HIGH));
-    startForeground(7, notification("正在连接监控进程"));
+    nm.createNotificationChannel(
+        new NotificationChannel("login", "登录时效提醒", NotificationManager.IMPORTANCE_DEFAULT));
+    startForeground(7, notification("正在连接监控进程", ""));
     arm(0);
   }
 
@@ -64,7 +66,8 @@ public final class GuardService extends Service {
                 + (s.optInt("activeSlot") > 0 ? "卡 " + s.optInt("activeSlot") : "暂无数据卡")
                 + " · "
                 + (s.optBoolean("dataOn") ? "数据开启" : "数据关闭");
-      updateNotification(nm, msg);
+      JSONArray logins = s.optJSONArray("logins");
+      updateNotification(nm, msg + loginHint(logins), loginLines(logins));
       if (s.optBoolean("wifiPaused")) nm.cancel(8);
       packageWarnings(s.optJSONArray("directedWarnings"));
       pendingPrompt(nm, s.optJSONObject("directedPending"));
@@ -73,6 +76,7 @@ public final class GuardService extends Service {
         if (nm.areNotificationsEnabled()) {
           packageAlerts(nm, s.optJSONArray("directedAlerts"));
           outsideAlerts(nm, s.optJSONObject("outsideAlerts"));
+          loginAlerts(nm, logins);
         }
       } catch (SecurityException ignored) {
         /* Notification permission does not change guard health. */
@@ -87,7 +91,7 @@ public final class GuardService extends Service {
       next = interactive && cellular && moving ? 10_000 : 45_000;
     } catch (Exception e) {
       updateNotification(
-          getSystemService(NotificationManager.class), "监控不可用，请打开应用检查 Root 授权");
+          getSystemService(NotificationManager.class), "监控不可用，请打开应用检查 Root 授权", "");
     } finally {
       if (!stop) arm(next);
     }
@@ -153,10 +157,99 @@ public final class GuardService extends Service {
     }
   }
 
-  void updateNotification(NotificationManager nm, String message) {
-    if (message.equals(lastNotification)) return;
-    nm.notify(7, notification(message));
-    lastNotification = message;
+  void updateNotification(NotificationManager nm, String message, String details) {
+    String shown = message + "\n" + details;
+    if (shown.equals(lastNotification)) return;
+    nm.notify(7, notification(message, details));
+    lastNotification = shown;
+  }
+
+  /** What needs the user in the collapsed line: an ended login first, then one about to end. */
+  static String loginHint(JSONArray logins) {
+    if (logins == null) return "";
+    String lost = "", near = "";
+    int count = 0;
+    for (int i = 0; i < logins.length(); i++) {
+      JSONObject l = logins.optJSONObject(i);
+      String name = "卡 " + l.optInt("slot") + " " + l.optString("label");
+      if (l.optLong("lostAt") > 0) {
+        count++;
+        if (lost.isEmpty()) lost = name + "已失效";
+      } else if (l.optBoolean("near")) {
+        count++;
+        if (near.isEmpty()) near = name + "将到期";
+      }
+    }
+    String first = lost.isEmpty() ? near : lost;
+    return first.isEmpty() ? "" : " · " + first + (count > 1 ? " 等 " + count + " 项" : "");
+  }
+
+  static String loginLines(JSONArray logins) {
+    if (logins == null) return "";
+    StringJoiner lines = new StringJoiner("\n");
+    for (int i = 0; i < logins.length(); i++) {
+      JSONObject l = logins.optJSONObject(i);
+      lines.add("卡 " + l.optInt("slot") + " " + l.optString("label") + "：" + l.optString("text"));
+    }
+    return lines.toString();
+  }
+
+  /** Once per ended login, and once per login expected to end soon; tapping opens that card. */
+  void loginAlerts(NotificationManager nm, JSONArray logins) throws Exception {
+    var prefs = getSharedPreferences("package-alerts", 0);
+    Set<String> old = prefs.getStringSet("loginShown", Set.of()), next = new HashSet<>();
+    var format = java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm");
+    for (int i = 0; logins != null && i < logins.length(); i++) {
+      JSONObject l = logins.getJSONObject(i);
+      boolean lost = l.optLong("lostAt") > 0;
+      if (!lost && !l.optBoolean("near")) continue;
+      String kind = l.optString("kind"),
+          id =
+              Integer.toHexString(
+                  (l.optString("identity") + kind + (lost ? l.optLong("lostAt") : l.optLong("expectedAt")))
+                      .hashCode()),
+          name = "卡 " + l.optInt("slot") + " " + l.optString("label");
+      next.add(id);
+      if (old.contains(id)) continue;
+      String title, text;
+      if (lost) {
+        title = name + "已失效";
+        text =
+            switch (kind) {
+              case Logins.WEB -> "后台已无法通过网上营业厅查询余量。点此到校准页重新登录，恢复免打开 App 的定时查询。";
+              case Logins.UNICOM -> "后台已无法查询联通余量。点此到校准页打开中国联通 App，用本卡号码登录一次即可自动恢复。";
+              default -> "后台读不到江苏 App 余量页。点此到校准页打开江苏 App，用本卡号码重新登录。";
+            };
+      } else {
+        title = name + "即将到期";
+        text =
+            "按上次登录维持的时长估算，约 "
+                + format.format(
+                    java.time.Instant.ofEpochMilli(l.optLong("expectedAt"))
+                        .atZone(java.time.ZoneId.systemDefault()))
+                + " 前后失效。到期后需要重新登录，失效时会再提醒。";
+      }
+      Intent open =
+          new Intent(this, MainActivity.class).putExtra("slot", l.optInt("slot")).putExtra("tab", 2);
+      nm.notify(
+          "login:" + id,
+          11,
+          new Notification.Builder(this, "login")
+              .setSmallIcon(R.drawable.ic_guard)
+              .setContentTitle(title)
+              .setContentText(text)
+              .setStyle(new Notification.BigTextStyle().bigText(text))
+              .setAutoCancel(true)
+              .setContentIntent(
+                  PendingIntent.getActivity(
+                      this,
+                      id.hashCode(),
+                      open,
+                      PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE))
+              .build());
+    }
+    for (String id : old) if (!next.contains(id)) nm.cancel("login:" + id, 11);
+    if (!old.equals(next)) prefs.edit().putStringSet("loginShown", next).apply();
   }
 
   void packageAlerts(NotificationManager nm, JSONArray alerts) throws Exception {
@@ -231,11 +324,13 @@ public final class GuardService extends Service {
     if (!old.equals(next)) prefs.edit().putStringSet("outsideShown", next).apply();
   }
 
-  Notification notification(String text) {
+  Notification notification(String text, String details) {
     return new Notification.Builder(this, "guard")
         .setSmallIcon(R.drawable.ic_guard)
         .setContentTitle("流量守卫 · 用量保护")
         .setContentText(text)
+        .setStyle(
+            new Notification.BigTextStyle().bigText(details.isEmpty() ? text : text + "\n" + details))
         .setOngoing(true)
         .setContentIntent(
             PendingIntent.getActivity(
