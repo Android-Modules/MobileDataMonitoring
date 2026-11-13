@@ -11,6 +11,7 @@ public final class GuardService extends Service {
   final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
   String lastNotification;
   String lastPending;
+  boolean webRouteKept;
   long seenBudget = -1;
   volatile boolean pauseOnWifi = true;
 
@@ -58,6 +59,10 @@ public final class GuardService extends Service {
         s = RootClient.action("health");
       }
       GuardApplication.syncLock(s);
+      if (!webRouteKept) {
+        webRouteKept = true;
+        MobileWeb.keep(this);
+      }
       pauseOnWifi = s.optBoolean("pauseOnWifi", true);
       String msg = s.optString("fault");
       if (msg.isEmpty())
@@ -171,6 +176,7 @@ public final class GuardService extends Service {
     int count = 0;
     for (int i = 0; i < logins.length(); i++) {
       JSONObject l = logins.optJSONObject(i);
+      if (l == null || !l.optBoolean("notify", true)) continue;
       String name = "卡 " + l.optInt("slot") + " " + l.optString("label");
       if (l.optLong("lostAt") > 0) {
         count++;
@@ -189,6 +195,7 @@ public final class GuardService extends Service {
     StringJoiner lines = new StringJoiner("\n");
     for (int i = 0; i < logins.length(); i++) {
       JSONObject l = logins.optJSONObject(i);
+      if (l == null || !l.optBoolean("notify", true)) continue;
       lines.add("卡 " + l.optInt("slot") + " " + l.optString("label") + "：" + l.optString("text"));
     }
     return lines.toString();
@@ -201,6 +208,7 @@ public final class GuardService extends Service {
     var format = java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm");
     for (int i = 0; logins != null && i < logins.length(); i++) {
       JSONObject l = logins.getJSONObject(i);
+      if (!l.optBoolean("notify", true)) continue;
       boolean lost = l.optLong("lostAt") > 0;
       if (!lost && !l.optBoolean("near")) continue;
       String kind = l.optString("kind"),

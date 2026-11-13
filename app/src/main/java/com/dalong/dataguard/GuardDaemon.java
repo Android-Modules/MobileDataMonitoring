@@ -407,6 +407,9 @@ final class GuardDaemon {
       case "mobileWeb":
         OfficialClient.mobileWeb(this, r);
         return new JSONObject().put("ok", true);
+      case "mobileWebKeep":
+        OfficialClient.mobileWebKeep(this, r);
+        return new JSONObject().put("ok", true);
       case "mobileWebLost":
         OfficialClient.mobileWebLost(this, r);
         return new JSONObject().put("ok", true);

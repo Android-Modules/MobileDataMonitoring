@@ -39,6 +39,12 @@ public final class LoginLife {
     return s.lostAt > 0 ? s : new State(s.loginAt, s.okAt, now, s.life);
   }
 
+  /** Drops a logout that the page itself did not confirm, and does not pretend it was just checked. */
+  public static State restored(State s) {
+    if (s == null || s.lostAt == 0) return s;
+    return new State(s.loginAt, s.okAt, 0, s.life);
+  }
+
   /** When this login should end if it lasts as long as the previous one; -1 without a basis. */
   public static long expectedEnd(State s) {
     return s.lostAt == 0 && s.loginAt > 0 && s.life > 0 ? s.loginAt + s.life : -1;

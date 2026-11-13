@@ -484,14 +484,40 @@ final class OfficialClient {
     Logins.ok(daemon, card.getString("identity"), Logins.WEB, r.optLong("loginAt"));
   }
 
+  /** Puts a web login the app still has back in front of the app and SMS. Does not invent a check. */
+  static void mobileWebKeep(GuardDaemon daemon, JSONObject r) throws Exception {
+    String id = r.optString("identity");
+    if (id.isEmpty()) return;
+    JSONObject card;
+    try {
+      card = daemon.findCardByIdentity(id);
+    } catch (IllegalArgumentException gone) {
+      return;
+    }
+    if (!"mobile".equals(card.optString("carrierCode"))) return;
+    JSONObject web = daemon.store.data.optJSONObject("webCard");
+    // Another card is signed in there now; this one must not take its place without a new read.
+    if (web != null && !id.equals(web.optString("identity"))) return;
+    if (web == null)
+      daemon
+          .store
+          .data
+          .put("webCard", new JSONObject().put("identity", id).put("at", System.currentTimeMillis()));
+    // A local "expired" flag can be wrong; the next read confirms it. Don't clear a real logout mark.
+    if (!r.optBoolean("expired")) Logins.restore(daemon, id, Logins.WEB);
+    if (web == null) daemon.store.save();
+  }
+
   static void mobileWebLost(GuardDaemon daemon, JSONObject r) throws Exception {
     String id = r.optString("identity");
     JSONObject card = daemon.store.data.optJSONObject("webCard");
     boolean current = card != null && card.optString("identity").equals(id);
     // Signing out on purpose is not an expiry: nothing is learned and nothing is reported.
     if (r.optBoolean("cleared")) {
-      Logins.forget(daemon, id, Logins.WEB);
       if (current) daemon.store.data.remove("webCard");
+      boolean tracked = Logins.get(daemon, id, Logins.WEB) != null;
+      Logins.forget(daemon, id, Logins.WEB);
+      if (current && !tracked) daemon.store.save();
       return;
     }
     if (current || Logins.get(daemon, id, Logins.WEB) != null) Logins.lost(daemon, id, Logins.WEB);
@@ -506,7 +532,7 @@ final class OfficialClient {
     daemon.store.event(
         "query",
         "网上营业厅登录已失效",
-        "登录失效后先发短信，仍读不到再用江苏 App。需要时在校准 → 网上营业厅重新登录。",
+        "登录失效后先读江苏 App，仍读不到再发短信。需要时在校准 → 网上营业厅重新登录。",
         "");
   }
 
@@ -741,17 +767,26 @@ final class OfficialClient {
         .start();
   }
 
-  /** Web hall first. After it is gone: a text, and only then the Jiangsu app. */
+  /** Web hall first. After it misses: the Jiangsu app, and only then a text. */
   static void appOrSms(GuardDaemon daemon, JSONObject card) throws Exception {
-    if (daemon.cardConfig(card).optBoolean("smsSync")) {
+    boolean sms = daemon.cardConfig(card).optBoolean("smsSync");
+    if (daemon.jiangsuApp(card)) {
+      openMobileApp(daemon, card, false, sms);
+      return;
+    }
+    if (sms) {
       SmsSync.refresh(daemon, card.getString("identity"));
       return;
     }
-    if (daemon.jiangsuApp(card)) openMobileApp(daemon, card, false);
-    else throw new IllegalArgumentException("本卡不是江苏移动号码，请登录网上营业厅，或发短信查询");
+    throw new IllegalArgumentException("本卡不是江苏移动号码，请登录网上营业厅，或发短信查询");
   }
 
   static void openMobileApp(GuardDaemon daemon, JSONObject card, boolean visible) throws Exception {
+    openMobileApp(daemon, card, visible, false);
+  }
+
+  static void openMobileApp(GuardDaemon daemon, JSONObject card, boolean visible, boolean textAfter)
+      throws Exception {
     String id = card.getString("identity");
     if (!daemon.jiangsuApp(card)) throw new IllegalArgumentException("中国移动江苏 App 只支持江苏移动号码");
     JSONObject c = daemon.cardConfig(card);
@@ -760,7 +795,7 @@ final class OfficialClient {
     if (route != null && !visible) {
       queryState(daemon, id, "waiting", "正在后台读取本卡官方余量", System.currentTimeMillis());
       daemon.store.save();
-      HiddenPage.refresh(daemon, id, user, route);
+      HiddenPage.refresh(daemon, id, user, route, textAfter);
       return;
     }
     queryState(

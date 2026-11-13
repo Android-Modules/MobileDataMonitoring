@@ -224,6 +224,32 @@ final class GuardUi {
     control.setChecked(checked);
     control.setMinHeight(dp(52));
     control.setSwitchPadding(dp(14));
+    tint(control);
+    p.addView(control, new LinearLayout.LayoutParams(-1, -2));
+    return control;
+  }
+
+  /** Same icon and title as a list row, with the switch on the right. */
+  Switch toggle(LinearLayout p, String icon, String label, boolean checked) {
+    LinearLayout r = new LinearLayout(activity);
+    r.setGravity(Gravity.CENTER_VERTICAL);
+    r.setPadding(0, dp(8), 0, dp(8));
+    r.setMinimumHeight(dp(60));
+    Icon mark = new Icon(activity, icon, accent);
+    LinearLayout.LayoutParams il = new LinearLayout.LayoutParams(dp(23), dp(23));
+    il.setMargins(0, 0, dp(12), 0);
+    r.addView(mark, il);
+    r.addView(heading(label, 14), new LinearLayout.LayoutParams(0, -2, 1));
+    Switch control = new Switch(activity);
+    control.setChecked(checked);
+    control.setShowText(false);
+    tint(control);
+    r.addView(control);
+    p.addView(r);
+    return control;
+  }
+
+  void tint(Switch control) {
     control.setThumbTintList(
         new ColorStateList(
             new int[][] {{android.R.attr.state_checked}, {}}, new int[] {accent, muted}));
@@ -231,8 +257,6 @@ final class GuardUi {
         new ColorStateList(
             new int[][] {{android.R.attr.state_checked}, {}},
             new int[] {(accent & 0x00ffffff) | 0x66000000, (muted & 0x00ffffff) | 0x44000000}));
-    p.addView(control, new LinearLayout.LayoutParams(-1, -2));
-    return control;
   }
 
   void hint(LinearLayout p, String s) {
@@ -471,6 +495,15 @@ final class GuardUi {
           path(canvas, 3, 10, 21, 10);
           path(canvas, 7, 2, 7, 7);
           path(canvas, 17, 2, 17, 7);
+          break;
+        case "bell":
+          path(canvas, 12, 3, 12, 5);
+          canvas.drawArc(6, 5, 18, 17, 180, -180, false, p);
+          path(canvas, 6, 11, 4, 17, 20, 17, 18, 11);
+          canvas.drawArc(10, 17, 14, 21, 0, 180, false, p);
+          break;
+        case "message":
+          path(canvas, 4, 5, 20, 5, 20, 15, 13, 15, 8, 20, 8, 15, 4, 15, 4, 5);
           break;
         case "trash":
           path(canvas, 4, 6, 20, 6);

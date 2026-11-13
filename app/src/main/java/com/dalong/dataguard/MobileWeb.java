@@ -3,6 +3,7 @@ package com.dalong.dataguard;
 import android.content.Context;
 import android.os.*;
 import android.webkit.*;
+import com.dalong.dataguard.core.WebSession;
 import org.json.*;
 
 /**
@@ -20,6 +21,10 @@ final class MobileWeb {
           + "return JSON.stringify({telephone:s.user.telephone,oprTime:f.oprTime||'',"
           + "flow:{planRemian:f.planRemian,otherRemian:f.otherRemian||null,outUsedInfo:f.outUsedInfo||null}});}"
           + "}catch(e){}return null;})()";
+  /** Visible text only. The login decision is {@link WebSession#judge}, not the address. */
+  static final String PAGE_TEXT =
+      "(function(){try{var t=document.body&&document.body.innerText||'';return t.slice(0,4000)}"
+          + "catch(e){return ''}})()";
   static final Handler main = new Handler(Looper.getMainLooper());
 
   interface Done {
@@ -59,20 +64,17 @@ final class MobileWeb {
         new WebViewClient() {
           @Override
           public void onPageFinished(WebView view, String url) {
-            // A live session can pass through the bind URL. Only a page that stays there is logged out.
+            // A live session is sent through this address and stays there saying it is signed in.
             if (!loginPage(url)) return;
-            main.postDelayed(
-                () -> {
-                  if (!ended[0] && loginPage(web.getUrl())) finish.accept(null, "login");
-                },
-                8000);
+            main.postDelayed(() -> classify(web, ended, finish, false), 8000);
           }
         });
     poll[0] =
         () -> {
           if (ended[0]) return;
           if (SystemClock.elapsedRealtime() > deadline) {
-            finish.accept(null, loginPage(web.getUrl()) ? "login" : "timeout");
+            if (loginPage(web.getUrl())) classify(web, ended, finish, true);
+            else finish.accept(null, "timeout");
             return;
           }
           web.evaluateJavascript(
@@ -91,6 +93,44 @@ final class MobileWeb {
         };
     web.loadUrl(HOME);
     main.postDelayed(poll[0], 3000);
+  }
+
+  /** "in" goes home and keeps reading; "out" is a real logout; anything else is not one. */
+  static void classify(
+      WebView web,
+      boolean[] ended,
+      java.util.function.BiConsumer<JSONObject, String> finish,
+      boolean deadline) {
+    if (ended[0]) return;
+    if (!loginPage(web.getUrl())) {
+      if (deadline) finish.accept(null, "timeout");
+      return;
+    }
+    web.evaluateJavascript(
+        PAGE_TEXT,
+        raw -> {
+          if (ended[0]) return;
+          switch (WebSession.judge(jsText(raw))) {
+            case WebSession.IN -> {
+              if (deadline) finish.accept(null, "timeout");
+              else web.loadUrl(HOME);
+            }
+            case WebSession.OUT -> finish.accept(null, "login");
+            default -> {
+              if (deadline) finish.accept(null, "timeout");
+            }
+          }
+        });
+  }
+
+  static String jsText(String raw) {
+    if (raw == null || "null".equals(raw)) return "";
+    try {
+      Object value = new JSONTokener(raw).nextValue();
+      return value instanceof String text ? text : "";
+    } catch (Exception ignored) {
+      return "";
+    }
   }
 
   static android.content.SharedPreferences prefs(Context c) {
@@ -154,6 +194,29 @@ final class MobileWeb {
     web.destroy();
     prefs(context).edit().clear().commit();
     if (!previous.isEmpty()) lost(previous, true);
+  }
+
+  /**
+   * The app still has this card's web login, so the worker should keep trying it first. Repairs a
+   * logout reported earlier that this app did not confirm.
+   */
+  static void keep(Context c) {
+    String id = identity(c);
+    if (id.isEmpty()) return;
+    boolean expired = prefs(c).getBoolean("expired", false);
+    new Thread(
+            () -> {
+              try {
+                RootClient.request(
+                    new JSONObject()
+                        .put("action", "mobileWebKeep")
+                        .put("identity", id)
+                        .put("expired", expired));
+              } catch (Exception ignored) {
+              }
+            },
+            "mobile-web-keep")
+        .start();
   }
 
   /**

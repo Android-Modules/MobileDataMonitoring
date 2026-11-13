@@ -144,8 +144,11 @@ final class HiddenPage {
     }
   }
 
-  /** User-started: a failed silent read falls back to the visible page, for a fresh login. */
-  static void refresh(GuardDaemon daemon, String identity, int user, JSONObject route) {
+  /**
+   * User-started: a failed silent read falls back to the visible page, for a fresh login. When the
+   * phone is locked and a text is allowed, that is the next step instead of waiting for a screen.
+   */
+  static void refresh(GuardDaemon daemon, String identity, int user, JSONObject route, boolean textAfter) {
     if (!running.compareAndSet(false, true)) return;
     new Thread(
             () -> {
@@ -162,6 +165,10 @@ final class HiddenPage {
                   synchronized (daemon) {
                     // Never leave a page behind for a phone that is locked in someone's pocket.
                     boolean visible = daemon.platform.interactive(), login = loginAt >= started;
+                    if (textAfter && !visible && daemon.cardConfig(daemon.findCardByIdentity(identity)).optBoolean("smsSync")) {
+                      SmsSync.refresh(daemon, identity);
+                      return;
+                    }
                     OfficialClient.queryState(
                         daemon,
                         identity,
@@ -227,7 +234,7 @@ final class HiddenPage {
     }
   }
 
-  /** Unattended: web hall first, one immediate retry while the login remains, then SMS, then the app. */
+  /** Unattended: web hall first, one immediate retry while the login remains, then the app, then SMS. */
   static void scheduled(GuardDaemon daemon) throws Exception {
     JSONArray due = new JSONArray();
     long now = System.currentTimeMillis();
@@ -285,10 +292,30 @@ final class HiddenPage {
         running.set(false);
       }
       if (done) continue;
-      boolean webRemains = webSession(daemon, id);
+      // An app login already shown signed out is not opened again every interval; a text can follow.
+      boolean appLost;
+      synchronized (daemon) {
+        var life = Logins.get(daemon, id, Logins.APP);
+        appLost = life != null && life.lostAt() > 0;
+      }
+      boolean appReady = item.has("route") && !appLost;
       com.dalong.dataguard.core.OfficialRoute.Step step =
-          com.dalong.dataguard.core.OfficialRoute.afterWeb(
-              webRemains, item.optBoolean("sms"), item.has("route"));
+          com.dalong.dataguard.core.OfficialRoute.next(appReady, item.optBoolean("sms"));
+      if (step == com.dalong.dataguard.core.OfficialRoute.Step.APP && running.compareAndSet(false, true)) {
+        try {
+          synchronized (daemon) {
+            OfficialClient.queryState(
+                daemon, id, "waiting", "网上营业厅没有读到，正在读取江苏 App", System.currentTimeMillis());
+          }
+          done = read(daemon, id, item.getInt("user"), item.getJSONObject("route"));
+        } catch (Exception unsupported) {
+          done = false;
+        } finally {
+          running.set(false);
+        }
+        if (done) continue;
+        step = com.dalong.dataguard.core.OfficialRoute.next(false, item.optBoolean("sms"));
+      }
       if (step == com.dalong.dataguard.core.OfficialRoute.Step.SMS) {
         synchronized (daemon) {
           long at = System.currentTimeMillis();
@@ -299,34 +326,25 @@ final class HiddenPage {
         }
         continue;
       }
-      if (step == com.dalong.dataguard.core.OfficialRoute.Step.APP && running.compareAndSet(false, true)) {
-        try {
-          synchronized (daemon) {
-            OfficialClient.queryState(daemon, id, "waiting", "网上营业厅不可用，正在读取江苏 App", now);
-          }
-          done = read(daemon, id, item.getInt("user"), item.getJSONObject("route"));
-        } catch (Exception unsupported) {
-          done = false;
-        } finally {
-          running.set(false);
-        }
-        if (done) continue;
-      }
       synchronized (daemon) {
         long at = System.currentTimeMillis();
+        boolean webRemains = webSession(daemon, id);
         if (webRemains) {
           OfficialClient.queryState(
               daemon,
               id,
               "error",
-              OfficialClient.slotLabel(daemon, id) + "网上营业厅连读两次都没有读到，登录仍在，下次仍先走网上营业厅",
+              OfficialClient.slotLabel(daemon, id) + "网上营业厅这次没读到，登录仍在，下次仍先走网上营业厅",
               at);
           if (at - failureLoggedAt.getOrDefault(id, 0L) >= SMS_EVERY_MS) {
             failureLoggedAt.put(id, at);
             daemon.store.event(
                 "query",
                 "网上营业厅这次没有读到",
-                "登录仍有效，已立刻再读一次，仍没有结果，没有改用江苏 App。",
+                "登录仍有效，没有判为失效。"
+                    + (appReady
+                        ? "江苏 App 也没读到，短信未到发送时间。"
+                        : appLost ? "江苏 App 登录已失效，短信未到发送时间。" : "江苏 App 没有可后台读取的页面。"),
                 "");
           }
         } else {
@@ -334,12 +352,12 @@ final class HiddenPage {
               daemon,
               id,
               "error",
-              OfficialClient.slotLabel(daemon, id) + "后台更新未完成，请确认江苏 App 已登录或开启短信查询",
+              OfficialClient.slotLabel(daemon, id) + "后台更新未完成。顺序是网上营业厅、江苏 App，然后才是短信",
               at);
           if (at - failureLoggedAt.getOrDefault(id, 0L) >= SMS_EVERY_MS) {
             failureLoggedAt.put(id, at);
             daemon.store.event(
-                "query", "移动后台更新未完成", "网上营业厅未登录。已尝试短信或江苏 App，仍未读到本卡余量。", "");
+                "query", "移动后台更新未完成", "已先试网上营业厅，再试江苏 App，仍未读到本卡余量。短信未开或未到发送时间。", "");
           }
         }
       }

@@ -21,14 +21,13 @@ public class AccountingTest {
   }
 
   @Test
-  public void webHallStaysAheadOfSmsAndTheJiangsuApp() {
+  public void webHallThenTheJiangsuAppThenSms() {
     assertEquals(2, OfficialRoute.webReads(true));
     assertEquals(0, OfficialRoute.webReads(false));
-    assertEquals(OfficialRoute.Step.NONE, OfficialRoute.afterWeb(true, false, true));
-    assertEquals(OfficialRoute.Step.SMS, OfficialRoute.afterWeb(true, true, true));
-    assertEquals(OfficialRoute.Step.SMS, OfficialRoute.afterWeb(false, true, true));
-    assertEquals(OfficialRoute.Step.APP, OfficialRoute.afterWeb(false, false, true));
-    assertEquals(OfficialRoute.Step.NONE, OfficialRoute.afterWeb(false, false, false));
+    assertEquals(OfficialRoute.Step.APP, OfficialRoute.next(true, true));
+    assertEquals(OfficialRoute.Step.APP, OfficialRoute.next(true, false));
+    assertEquals(OfficialRoute.Step.SMS, OfficialRoute.next(false, true));
+    assertEquals(OfficialRoute.Step.NONE, OfficialRoute.next(false, false));
   }
 
   @Test

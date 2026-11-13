@@ -64,6 +64,15 @@ final class Logins {
     }
   }
 
+  /** Clears a logout the app no longer believes, without moving the last real confirmation. */
+  static void restore(GuardDaemon d, String identity, String kind) throws Exception {
+    synchronized (d) {
+      LoginLife.State before = get(d, identity, kind);
+      LoginLife.State now = LoginLife.restored(before);
+      if (now != before) put(d, identity, kind, now);
+    }
+  }
+
   static void forget(GuardDaemon d, String identity, String kind) throws Exception {
     synchronized (d) {
       if (get(d, identity, kind) != null) put(d, identity, kind, null);
@@ -84,12 +93,15 @@ final class Logins {
       for (Iterator<String> it = kinds.keys(); it.hasNext(); ) {
         String kind = it.next();
         LoginLife.State s = read(kinds.optJSONObject(kind));
+        // Jiangsu app expiry is quiet unless this card asked to be told. Web and Unicom always show.
+        boolean notify = !APP.equals(kind) || d.cardConfig(card).optBoolean("notifyAppLogin");
         out.put(
             new JSONObject()
                 .put("slot", card.getInt("slot"))
                 .put("identity", card.getString("identity"))
                 .put("kind", kind)
                 .put("label", label(kind))
+                .put("notify", notify)
                 .put("loginAt", s.loginAt())
                 .put("lostAt", s.lostAt())
                 .put("expectedAt", LoginLife.expectedEnd(s))

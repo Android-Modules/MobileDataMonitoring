@@ -1105,7 +1105,7 @@ public final class MainActivity extends Activity {
     } else if (carrier.equals("mobile")) {
       JSONObject card = cardFor(slot);
       title(s.content, "中国移动 · " + regionLabel(card));
-      note(s.content, "网上营业厅：全国移动号码可用。用本卡号码和短信验证码登录后，一键更新和定时查询都在模块里完成，不需要官方 App；登录状态只保存在本机，失效时会提示重新登录。");
+      note(s.content, "网上营业厅：全国移动号码可用。用本卡号码和短信验证码登录后，一键更新和定时查询都在模块里完成。定时顺序是网上营业厅、江苏 App、短信。登录页写着已登录不算失效，出现验证码才算。");
       note(s.content, "短信查询：向 10086 发送 CXLL，回复里有通用、定向和套外用量，不需要登录。");
       if (jiangsuApp(card)) {
         title(s.content, "中国移动江苏 App");
@@ -1280,15 +1280,17 @@ public final class MainActivity extends Activity {
               l.optLong("lostAt") > 0 || l.optBoolean("near") ? ui.warn : ui.muted));
     }
     if (source.equals("mobile")) {
-      boolean app = jiangsuApp(card), web = MobileWeb.usable(this, card.getString("identity"));
+      boolean app = jiangsuApp(card),
+          savedWeb = card.getString("identity").equals(MobileWeb.identity(this));
       officialButton(p);
       note(
           p,
-          web
-              ? "优先走网上营业厅，不需要官方 App，熄屏也能定时更新；登录还在但这次没读到，会立刻再读一次。登录失效后"
-                  + (app ? "先发短信，仍不行再用江苏 App。" : "改发短信。")
+          savedWeb
+              ? "先读网上营业厅，熄屏也能定时更新。这次没读到会再读一次，仍没有结果时"
+                  + (app ? "再读江苏 App，最后才发短信。" : "再发短信。")
+                  + "只有登录页出现验证码才算网页失效。"
               : app
-                  ? "江苏移动号码：在后台读取江苏 App 余量页，不影响屏幕。首次需在 App 点击流量进入余量查询一次。"
+                  ? "没有网上营业厅登录时，先在后台读江苏 App，读不到再发短信。首次需在 App 点击流量进入余量查询一次。"
                   : regionNote(card));
       if (app) {
         var framework = GuardApplication.framework;
@@ -1317,7 +1319,7 @@ public final class MainActivity extends Activity {
       scheduleRow(p);
       ui.row(p, "refresh", "发短信查询", "向 10086 发送 CXLL，不需要 App 登录", this::smsQuery);
       Switch auto =
-          ui.toggle(p, "后台更新失败时发短信", card.getJSONObject("config").optBoolean("smsSync"));
+          ui.toggle(p, "message", "后台更新失败时发短信", card.getJSONObject("config").optBoolean("smsSync"));
       auto.setOnCheckedChangeListener((button, on) -> {
         if (busy) {
           render();
@@ -1333,6 +1335,26 @@ public final class MainActivity extends Activity {
         }
       });
       note(p, "回复会出现在短信收件箱，模块不会删除。查询短信一般免费，是否收费以套餐为准。");
+      if (app) {
+        Switch appNotify =
+            ui.toggle(
+                p, "bell", "江苏 App 登录失效时通知", card.getJSONObject("config").optBoolean("notifyAppLogin"));
+        appNotify.setOnCheckedChangeListener((button, on) -> {
+          if (busy) {
+            render();
+            return;
+          }
+          try {
+            JSONObject next = copyConfig();
+            mutableCard(next).put("notifyAppLogin", on);
+            submit(null, configRequest(next), on ? "已打开江苏 App 登录通知" : "已关闭江苏 App 登录通知");
+          } catch (Exception e) {
+            render();
+            showMessage("设置未保存", safeError(e));
+          }
+        });
+        note(p, "默认关闭。打开后，江苏 App 登录失效或快到期才会发通知，不影响网上营业厅，也不改变查询顺序。");
+      }
     } else if (source.equals("unicom")) {
       officialButton(p);
       note(p, "在中国联通 App 用本卡号码登录并进入余量查询后，模块自动取得连接，之后后台定时更新。登录过期时一键更新会打开 App。");
@@ -1528,7 +1550,8 @@ public final class MainActivity extends Activity {
             .putString("officialPending", identity)
             .putLong("officialPendingAt", System.currentTimeMillis())
             .apply();
-      if (official && carrier.equals("mobile") && MobileWeb.usable(this, identity))
+      // Try the saved web login even if an earlier read marked it expired; the page decides.
+      if (official && carrier.equals("mobile") && identity.equals(MobileWeb.identity(this)))
         webRefresh(target, identity);
       else rootRefresh(target, identity, official, false);
     } catch (Exception e) {
@@ -1536,7 +1559,7 @@ public final class MainActivity extends Activity {
     }
   }
 
-  /** Web hall first. A miss while the login remains is read once more; only a real logout uses SMS, then the app. */
+  /** Web hall first, once more if it misses. Then the Jiangsu app, and only then a text. */
   void webRefresh(int target, String identity) {
     webReading = true;
     render();
@@ -1555,21 +1578,26 @@ public final class MainActivity extends Activity {
           }
           if (page == null) {
             webReading = false;
-            if (!"login".equals(error)) {
+            boolean loggedOut = "login".equals(error);
+            if (loggedOut) {
+              MobileWeb.expire(MainActivity.this);
+              MobileWeb.lost(identity, false);
+            }
+            JSONObject failed = cardFor(target);
+            JSONObject cfg = failed == null ? null : failed.optJSONObject("config");
+            boolean app = jiangsuApp(failed), sms = cfg != null && cfg.optBoolean("smsSync");
+            if (!app && !sms) {
               busy = false;
               getPreferences(0).edit().remove("officialPending").apply();
-              toast("网上营业厅连读两次都没有响应，登录仍在");
+              toast(loggedOut ? "网上营业厅登录已失效，请重新登录" : "网上营业厅没有读到，登录仍在");
               render();
               return;
             }
-            MobileWeb.expire(MainActivity.this);
-            MobileWeb.lost(identity, false);
-            JSONObject failed = cardFor(target);
-            JSONObject cfg = failed == null ? null : failed.optJSONObject("config");
+            String follow = app ? "改为读取江苏 App" + (sms ? "，仍不行再发短信" : "") : "改为发送查询短信";
             toast(
-                cfg != null && cfg.optBoolean("smsSync")
-                    ? "网上营业厅登录已失效，改为发送查询短信"
-                    : "网上营业厅登录已失效，改为读取江苏 App");
+                loggedOut
+                    ? "网上营业厅登录已失效，" + follow
+                    : "网上营业厅没有读到，登录仍在，" + follow);
             rootRefresh(target, identity, true, true);
             return;
           }

@@ -1,33 +1,33 @@
 package com.dalong.dataguard.core;
 
-/** Mobile official balance: the web hall stays first, then a text, then the Jiangsu app. */
+/** Mobile official balance: the web hall first, then the Jiangsu app, then a text. */
 public final class OfficialRoute {
   /** A live web login that misses once is read again, and only once. */
   public static final int WEB_RETRY = 1;
 
   public enum Step {
-    SMS,
     APP,
+    SMS,
     NONE
   }
 
   private OfficialRoute() {}
 
-  /**
-   * What to do after the web hall was tried, or when this card has no web login.
-   *
-   * @param webSessionRemains the saved web login is still the route to keep
-   * @param smsDue a query text is allowed now
-   * @param appReady a Jiangsu app page can be opened
-   */
-  /** Reads to perform while the login is still valid: the scheduled one, plus a single retry. */
+  /** Reads while this card still has a web login: the scheduled one, plus a single retry. */
   public static int webReads(boolean loggedIn) {
     return loggedIn ? 1 + WEB_RETRY : 0;
   }
 
-  public static Step afterWeb(boolean webSessionRemains, boolean smsDue, boolean appReady) {
-    if (webSessionRemains) return smsDue ? Step.SMS : Step.NONE;
+  /**
+   * What to do after the web hall did not return a balance. A text never jumps ahead of a Jiangsu
+   * app that can still be read, whether or not the web login itself is still good.
+   *
+   * @param appReady a Jiangsu app page can be opened now
+   * @param smsDue a query text is allowed now
+   */
+  public static Step next(boolean appReady, boolean smsDue) {
+    if (appReady) return Step.APP;
     if (smsDue) return Step.SMS;
-    return appReady ? Step.APP : Step.NONE;
+    return Step.NONE;
   }
 }

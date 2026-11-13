@@ -57,10 +57,13 @@ public final class WebLoginActivity extends Activity {
             }
             // Visiting the login page while signed in only says so; the balance is on the home page.
             view.evaluateJavascript(
-                "document.body&&document.body.innerText.indexOf('已成功登录')>=0",
-                signedIn -> {
-                  if ("true".equals(signedIn)) view.loadUrl(MobileWeb.HOME);
-                  else codeLogin = true;
+                MobileWeb.PAGE_TEXT,
+                raw -> {
+                  switch (com.dalong.dataguard.core.WebSession.judge(MobileWeb.jsText(raw))) {
+                    case com.dalong.dataguard.core.WebSession.IN -> view.loadUrl(MobileWeb.HOME);
+                    case com.dalong.dataguard.core.WebSession.OUT -> codeLogin = true;
+                    default -> {}
+                  }
                 });
           }
 

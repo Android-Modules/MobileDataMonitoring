@@ -57,6 +57,16 @@ public class LoginLifeTest {
   }
 
   @Test
+  public void restoringAFalseLogoutKeepsTheOldConfirmation() {
+    var s = LoginLife.lost(LoginLife.ok(null, T0 + H, T0), T0 + D);
+    var back = LoginLife.restored(s);
+    assertEquals(0, back.lostAt());
+    assertEquals(T0, back.loginAt());
+    assertEquals(T0 + H, back.okAt());
+    assertEquals(back, LoginLife.restored(back));
+  }
+
+  @Test
   public void theFirstDetectionTimeIsKept() {
     var s = LoginLife.lost(LoginLife.ok(null, T0, T0), T0 + D);
     assertEquals(T0 + D, LoginLife.lost(s, T0 + 2 * D).lostAt());

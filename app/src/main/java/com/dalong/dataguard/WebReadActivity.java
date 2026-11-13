@@ -13,8 +13,8 @@ public final class WebReadActivity extends Activity {
   public void onCreate(Bundle state) {
     super.onCreate(state);
     String identity = getIntent().getStringExtra("identity");
-    if (identity == null || !MobileWeb.usable(this, identity)) {
-      if (identity != null) MobileWeb.lost(identity, false);
+    // A missing local flag is not a logout. The page is, and only when it shows the login form.
+    if (identity == null || identity.isEmpty()) {
       finish();
       return;
     }
