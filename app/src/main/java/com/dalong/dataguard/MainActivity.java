@@ -1338,7 +1338,7 @@ public final class MainActivity extends Activity {
       if (app) {
         Switch appNotify =
             ui.toggle(
-                p, "bell", "江苏 App 登录失效时通知", card.getJSONObject("config").optBoolean("notifyAppLogin"));
+                p, "alert", "江苏 App 登录失效时通知", card.getJSONObject("config").optBoolean("notifyAppLogin"));
         appNotify.setOnCheckedChangeListener((button, on) -> {
           if (busy) {
             render();

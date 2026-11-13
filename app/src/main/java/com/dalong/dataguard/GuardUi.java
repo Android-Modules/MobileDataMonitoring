@@ -496,11 +496,10 @@ final class GuardUi {
           path(canvas, 7, 2, 7, 7);
           path(canvas, 17, 2, 17, 7);
           break;
-        case "bell":
-          path(canvas, 12, 3, 12, 5);
-          canvas.drawArc(6, 5, 18, 17, 180, -180, false, p);
-          path(canvas, 6, 11, 4, 17, 20, 17, 18, 11);
-          canvas.drawArc(10, 17, 14, 21, 0, 180, false, p);
+        case "alert":
+          path(canvas, 12, 3, 21, 20.5f, 3, 20.5f, 12, 3);
+          path(canvas, 12, 8.5f, 12, 13);
+          canvas.drawPoint(12, 17, p);
           break;
         case "message":
           path(canvas, 4, 5, 20, 5, 20, 15, 13, 15, 8, 20, 8, 15, 4, 15, 4, 5);
