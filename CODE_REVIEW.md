@@ -1,3 +1,11 @@
+# 0.9.16 中国移动江苏 App 自动续期与观察器修复
+
+| 等级 | 问题 | 修复与验证 |
+| --- | --- | --- |
+| P1 | 中国移动江苏 App（`com.jsmcc`）约 2–3 天（甚至数小时）掉登录：后台隐藏读取直接拉起 `CommonHtml5Activity`（`marginQuery`），跳过了主入口 `StartPageActivity` 的原生 `uamonekeylogin/autoLogin`（负责用多日凭证 `r-token` 刷新短期 `JSESSIONID` 并滚动续期 `r-token`）；且当 `JSESSIONID` 过期（`500002`）时，`marginQuery` 页面 JS 会主动调用 `window.newSdkInterface.quitLogin()`，直接清空原生保存的 `r-token` | 非前台使用时，后台隐藏读取先清理残留旧进程并在隐藏虚拟屏拉起 `StartPageActivity` 预热 6 秒触发 `autoLogin` 刷新 `JSESSIONID` 与 `r-token`，再打开 `CommonHtml5Activity` 读取余量；在网上营业厅在线期间每 6 小时自动执行一次江苏 App 后台预热保活。在 `marginQuery` 页面通过 `Proxy` 拦截 `newSdkInterface.quitLogin` 防止误清原生 `r-token`，首次遇 `500002` 延迟 2.5 秒重载以接纳刚刷新的 `JSESSIONID`，重载后仍失败才转调 `showLogin()` 上报掉线 |
+| P1 | Android 17（HyperOS 4）配合 `com.jsmcc` 爱加密壳（`s.h.e.l.l.S`）时，`Application.attach` 被绕过，`MobilePageObserver` 未能注入 | 在 `GuardModule.onModuleLoaded` 与 `onPackageReady` 直接注册仅依赖系统框架类的 `MobilePageObserver` 与 `UnicomSession`，并补充 `Activity.onCreate` 兜底挂载应用层流量观察器 |
+| P2 | 用户最近任务列表（`getRecentTasks`）存在历史卡片时，后台读取将 `keepRunning` 判为 `true`，读取后不退出后台进程且下次读取不走冷启动 `autoLogin` | 仅在屏幕亮屏且 `com.jsmcc` 处于前台运行时保留原进程；后台读取结束后移除虚拟屏临时任务并停止后台进程，保留用户原有最近任务卡片 |
+
 # 0.9.15 中国移动网上营业厅会话自动续期
 
 | 等级 | 问题 | 修复与验证 |

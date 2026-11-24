@@ -460,6 +460,30 @@ public final class Platform {
     return ids;
   }
 
+  /** True once the splash screen on the hidden display has handed over to the main tab page. */
+  boolean mobileMainReady(int user, Set<Integer> before) {
+    try {
+      Object manager =
+          Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null);
+      Object slice =
+          manager
+              .getClass()
+              .getMethod("getRecentTasks", int.class, int.class, int.class)
+              .invoke(manager, 100, 1, user);
+      for (Object o : (List<?>) slice.getClass().getMethod("getList").invoke(slice)) {
+        var task = (android.app.ActivityManager.RecentTaskInfo) o;
+        if (before != null && before.contains(task.taskId)) continue;
+        ComponentName top = task.topActivity;
+        if (top != null
+            && MOBILE_APP.equals(top.getPackageName())
+            && !top.getClassName().endsWith(".StartPageActivity"))
+          return true;
+      }
+    } catch (Exception ignored) {
+    }
+    return false;
+  }
+
   void removeTask(int id) throws Exception {
     Object manager =
         Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null);

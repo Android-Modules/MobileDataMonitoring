@@ -56,8 +56,8 @@ final class Logins {
     synchronized (d) {
       LoginLife.State next =
           LoginLife.ok(get(d, identity, kind), System.currentTimeMillis(), login);
-      // Web sessions are rotated every 12 minutes; an older 72-hour lifespan is no longer a cap.
-      if (WEB.equals(kind) && next.life() != 0)
+      // Web and Jiangsu App sessions are auto-renewed; an older measured lifespan is no longer a cap.
+      if ((WEB.equals(kind) || APP.equals(kind)) && next.life() != 0)
         next = new LoginLife.State(next.loginAt(), next.okAt(), next.lostAt(), 0);
       put(d, identity, kind, next);
     }
@@ -98,7 +98,7 @@ final class Logins {
       for (Iterator<String> it = kinds.keys(); it.hasNext(); ) {
         String kind = it.next();
         LoginLife.State s = read(kinds.optJSONObject(kind));
-        if (WEB.equals(kind) && s.life() != 0)
+        if ((WEB.equals(kind) || APP.equals(kind)) && s.life() != 0)
           s = new LoginLife.State(s.loginAt(), s.okAt(), s.lostAt(), 0);
         // Jiangsu app expiry is quiet unless this card asked to be told. Web and Unicom always show.
         boolean notify = !APP.equals(kind) || d.cardConfig(card).optBoolean("notifyAppLogin");

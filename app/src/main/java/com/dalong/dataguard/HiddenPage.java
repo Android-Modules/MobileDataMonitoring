@@ -24,7 +24,10 @@ final class HiddenPage {
   static final long LOAD_MS = 45000;
 
   static final AtomicBoolean running = new AtomicBoolean();
+  static final AtomicBoolean refreshQueued = new AtomicBoolean();
   static final long SMS_EVERY_MS = 3600000;
+  static final long APP_KEEPALIVE_MS = 6 * 3600000L;
+  static final long APP_WARM_MS = 9000L;
   static final Map<String, Long> failureLoggedAt = new HashMap<>();
   /** When the official app last showed its login screen; a read in progress stops there. */
   static volatile long loginAt;
@@ -102,7 +105,11 @@ final class HiddenPage {
     }
   }
 
-  /** The official app's balance page; a login screen ends the wait at once. */
+  /**
+   * The official app's balance page; a login screen ends the wait at once. When the user does not
+   * currently have the app open, starting its main entry first runs its native auto-login so
+   * {@code r-token} rotates and {@code JSESSIONID} is refreshed before the H5 quota page reads it.
+   */
   static boolean read(GuardDaemon daemon, String identity, int user, JSONObject route)
       throws Exception {
     Set<Integer> tasks;
@@ -115,15 +122,58 @@ final class HiddenPage {
       tasks = null;
     }
     Set<Integer> before = tasks;
-    boolean keepRunning = wasRunning;
+    boolean inForeground =
+        wasRunning
+            && daemon.platform.interactive()
+            && Platform.MOBILE_APP.equals(daemon.platform.foregroundPackage());
+    boolean keepRunning = tasks == null ? wasRunning : inForeground;
+    boolean warmAutoLogin = route != null && !inForeground;
+    if (!keepRunning && wasRunning)
+      try {
+        daemon.platform.forceStop(Platform.MOBILE_APP, user);
+      } catch (Exception ignored) {
+      }
     long started = System.currentTimeMillis();
+    int[] targetDisplay = {-1};
+    long[] routeOpenedAt = {0};
+    boolean[] routeRetried = {false};
     boolean done =
         onDisplay(
             daemon,
             identity,
             LOAD_MS,
-            d -> daemon.platform.openMobile(user, route, d),
-            since -> loginAt >= since,
+            d -> {
+              targetDisplay[0] = d;
+              if (warmAutoLogin) {
+                daemon.platform.openMobile(user, null, d);
+                long until = SystemClock.elapsedRealtime() + APP_WARM_MS;
+                long readyAt = 0;
+                while (SystemClock.elapsedRealtime() < until) {
+                  if (loginAt >= started) return;
+                  if (daemon.platform.mobileMainReady(user, before)) {
+                    if (readyAt == 0) readyAt = SystemClock.elapsedRealtime();
+                    else if (SystemClock.elapsedRealtime() - readyAt >= 1500) break;
+                  }
+                  Thread.sleep(500);
+                }
+              }
+              routeOpenedAt[0] = SystemClock.elapsedRealtime();
+              daemon.platform.openMobile(user, route, d);
+            },
+            since -> {
+              if (loginAt >= since) return true;
+              if (warmAutoLogin
+                  && !routeRetried[0]
+                  && routeOpenedAt[0] > 0
+                  && SystemClock.elapsedRealtime() - routeOpenedAt[0] >= 8000) {
+                routeRetried[0] = true;
+                try {
+                  daemon.platform.openMobile(user, route, targetDisplay[0]);
+                } catch (Exception ignored) {
+                }
+              }
+              return false;
+            },
             () -> cleanUp(daemon, Platform.MOBILE_APP, user, before, keepRunning));
     if (!done && loginAt >= started) Logins.lost(daemon, identity, Logins.APP);
     return done;
@@ -149,17 +199,32 @@ final class HiddenPage {
    * phone is locked and a text is allowed, that is the next step instead of waiting for a screen.
    */
   static void refresh(GuardDaemon daemon, String identity, int user, JSONObject route, boolean textAfter) {
-    if (!running.compareAndSet(false, true)) return;
+    if (!refreshQueued.compareAndSet(false, true)) return;
     new Thread(
             () -> {
               long started = System.currentTimeMillis();
               try {
+                long waitUntil = SystemClock.elapsedRealtime() + LOAD_MS + 15000;
+                while (!running.compareAndSet(false, true)) {
+                  if (SystemClock.elapsedRealtime() >= waitUntil) return;
+                  Thread.sleep(500);
+                }
+              } catch (InterruptedException e) {
+                return;
+              } finally {
+                refreshQueued.set(false);
+              }
+              try {
                 boolean done;
-                try {
-                  done = read(daemon, identity, user, route);
-                } catch (Exception unsupported) {
-                  // Some systems refuse hidden displays; the visible page still works there.
-                  done = false;
+                if (queryUpdated(daemon, identity, started)) {
+                  done = true;
+                } else {
+                  try {
+                    done = read(daemon, identity, user, route);
+                  } catch (Exception unsupported) {
+                    // Some systems refuse hidden displays; the visible page still works there.
+                    done = false;
+                  }
                 }
                 if (!done)
                   synchronized (daemon) {
@@ -253,6 +318,16 @@ final class HiddenPage {
             || now - c.optLong("mobileAttemptAt") < interval
             || (latest != null && now - latest.optLong("fetchedAt") < interval)) continue;
         boolean page = route != null && daemon.queryRouteUsable() && daemon.jiangsuApp(card);
+        var appLife = Logins.get(daemon, id, Logins.APP);
+        boolean appLost = appLife != null && appLife.lostAt() > 0;
+        boolean keepAlive =
+            page
+                && !appLost
+                && now
+                        - Math.max(
+                            c.optLong("mobileAppKeepAliveAt"),
+                            appLife == null ? 0 : appLife.okAt())
+                    >= APP_KEEPALIVE_MS;
         JSONObject webCard = daemon.store.data.optJSONObject("webCard");
         boolean web = webCard != null && id.equals(webCard.optString("identity"));
         // A short query interval must not turn into a text message every few minutes.
@@ -261,11 +336,13 @@ final class HiddenPage {
                 && now - (texted == null ? 0 : texted.optLong(id)) >= Math.max(interval, SMS_EVERY_MS);
         if (!web && !page && !sms) continue;
         c.put("mobileAttemptAt", now);
+        if (keepAlive) c.put("mobileAppKeepAliveAt", now);
         JSONObject item =
             new JSONObject()
                 .put("id", id)
                 .put("user", c.optInt("officialUser", 0))
                 .put("web", web)
+                .put("keepAlive", keepAlive)
                 .put("sms", sms);
         if (page) item.put("route", route);
         due.put(item);
@@ -291,7 +368,16 @@ final class HiddenPage {
       } finally {
         running.set(false);
       }
-      if (done) continue;
+      if (done) {
+        if (item.optBoolean("keepAlive") && running.compareAndSet(false, true))
+          try {
+            read(daemon, id, item.getInt("user"), item.getJSONObject("route"));
+          } catch (Exception ignored) {
+          } finally {
+            running.set(false);
+          }
+        continue;
+      }
       // An app login already shown signed out is not opened again every interval; a text can follow.
       boolean appLost;
       synchronized (daemon) {

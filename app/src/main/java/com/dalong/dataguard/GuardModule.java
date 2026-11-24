@@ -5,24 +5,50 @@ import java.lang.reflect.*;
 import org.json.*;
 
 public final class GuardModule extends XposedModule {
-  boolean phoneProcess, heartbeat, simGuardReady, dataGuardReady;
+  boolean phoneProcess, appInstalled, heartbeat, simGuardReady, dataGuardReady;
   volatile android.content.Context phoneContext;
 
   @Override
   public void onModuleLoaded(ModuleLoadedParam p) {
     phoneProcess = "com.android.phone".equals(p.getProcessName());
     log(4, "DataGuard", "API 102 / " + BuildConfig.VERSION_NAME + " loaded: " + p.getProcessName());
+    String pkg = p.getProcessName();
+    int colon = pkg.indexOf(':');
+    if (colon > 0) pkg = pkg.substring(0, colon);
+    if (!phoneProcess) {
+      MobilePageObserver.install(this, pkg);
+      UnicomSession.install(this, pkg);
+    }
     try {
       hook(android.app.Application.class.getDeclaredMethod("attach", android.content.Context.class))
           .intercept(chain -> {
             Object result = chain.proceed();
-            android.content.Context context = (android.content.Context) chain.getThisObject();
-            if (phoneProcess) phoneContext = context;
-            else installApp(context.getClassLoader(), context.getPackageName());
+            onApp((android.content.Context) chain.getThisObject());
             return result;
           });
     } catch (Throwable e) {
       log(5, "DataGuard", "Application observer unavailable: " + e.getClass().getSimpleName());
+    }
+    if (!phoneProcess)
+      try {
+        hook(
+                android.app.Activity.class.getDeclaredMethod(
+                    "onCreate", android.os.Bundle.class))
+            .intercept(chain -> {
+              Object result = chain.proceed();
+              onApp((android.content.Context) chain.getThisObject());
+              return result;
+            });
+      } catch (Throwable ignored) {
+      }
+  }
+
+  void onApp(android.content.Context context) {
+    if (context == null) return;
+    if (phoneProcess) phoneContext = context;
+    else if (!appInstalled) {
+      appInstalled = true;
+      installApp(context.getClassLoader(), context.getPackageName());
     }
   }
 
@@ -34,7 +60,11 @@ public final class GuardModule extends XposedModule {
 
   @Override
   public void onPackageReady(PackageReadyParam p) {
-    if (!p.getPackageName().equals("com.android.phone")) return;
+    if (!p.getPackageName().equals("com.android.phone")) {
+      MobilePageObserver.install(this, p.getPackageName());
+      UnicomSession.install(this, p.getPackageName());
+      return;
+    }
     for (String name :
         new String[] {
           "com.android.internal.telephony.subscription.SubscriptionManagerService",
