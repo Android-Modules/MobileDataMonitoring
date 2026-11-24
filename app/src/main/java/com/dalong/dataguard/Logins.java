@@ -54,7 +54,12 @@ final class Logins {
   /** {@code login} is when the login in use began, or 0 for the one already known. */
   static void ok(GuardDaemon d, String identity, String kind, long login) throws Exception {
     synchronized (d) {
-      put(d, identity, kind, LoginLife.ok(get(d, identity, kind), System.currentTimeMillis(), login));
+      LoginLife.State next =
+          LoginLife.ok(get(d, identity, kind), System.currentTimeMillis(), login);
+      // Web sessions are rotated every 12 minutes; an older 72-hour lifespan is no longer a cap.
+      if (WEB.equals(kind) && next.life() != 0)
+        next = new LoginLife.State(next.loginAt(), next.okAt(), next.lostAt(), 0);
+      put(d, identity, kind, next);
     }
   }
 
@@ -93,6 +98,8 @@ final class Logins {
       for (Iterator<String> it = kinds.keys(); it.hasNext(); ) {
         String kind = it.next();
         LoginLife.State s = read(kinds.optJSONObject(kind));
+        if (WEB.equals(kind) && s.life() != 0)
+          s = new LoginLife.State(s.loginAt(), s.okAt(), s.lostAt(), 0);
         // Jiangsu app expiry is quiet unless this card asked to be told. Web and Unicom always show.
         boolean notify = !APP.equals(kind) || d.cardConfig(card).optBoolean("notifyAppLogin");
         out.put(

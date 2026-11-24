@@ -63,6 +63,7 @@ public final class GuardService extends Service {
         webRouteKept = true;
         MobileWeb.keep(this);
       }
+      MobileWeb.keepAlive(this, false);
       pauseOnWifi = s.optBoolean("pauseOnWifi", true);
       String msg = s.optString("fault");
       if (msg.isEmpty())
